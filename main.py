@@ -39,6 +39,18 @@ SOURCE_CHANNEL_IDS = [
     if channel.strip()
 ]
 
+# ==================== CUSTOM ANIME POSTERS ====================
+
+# ==================== ANIME POSTER URLS ====================
+
+ANIME_POSTERS = {
+    "Naruto Shippuden": "https://imgyx.pages.dev/VQw3e",
+    "Liar Game": "https://imgyx.pages.dev/sjYWT",
+    "Blue Box": "https://example.com/one-piece.jpg",
+}
+
+DEFAULT_POSTER_URL = "https://example.com/default-anime.jpg"
+
 PORT = int(os.getenv("PORT", "10000"))
 
 if not BOT_TOKEN:
@@ -166,28 +178,23 @@ async def status_command(
 
 # ==================== EPISODE DETECTION ====================
 
-async def handle_channel_post(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    message = update.channel_post
+poster_url = get_anime_poster_url(anime_name)
 
-    if message is None:
-        return
-
-    if not source_is_allowed(message.chat):
-        return
-
-    text = get_message_text(message)
-
-    if not text or not contains_episode(text):
-        return
-
-    source_name = (
-        message.chat.title
-        or message.chat.username
-        or str(message.chat.id)
+try:
+    await context.bot.send_photo(
+        chat_id=MAIN_CHANNEL_ID,
+        photo=poster_url,
+        caption=announcement,
+        reply_markup=keyboard,
     )
+
+    logger.info(
+        "Posted episode announcement for %s",
+        anime_name,
+    )
+
+except Exception:
+    logger.exception("Failed to publish episode announcement")
 
     # Extract anime name and episode number
     lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -237,14 +244,11 @@ async def handle_channel_post(
     keyboard = None
 
     if join_url:
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(
-                    "🔥 JOIN NOW 🔥",
-                    url=join_url,
-                )
-            ]
-        ])
+        anime_link = get_anime_channel_link(anime_name)
+
+keyboard = InlineKeyboardMarkup([
+    [InlineKeyboardButton("🔥 WATCH NOW 🔥", url=anime_link)]
+])
 
     try:
         await context.bot.send_message(
@@ -265,6 +269,24 @@ async def handle_channel_post(
 
 
 # ==================== MAIN ====================
+ANIME_CHANNEL_LINKS = {
+    "Naruto Shippuden": "https://t.me/+uKuAaVBzmSs0ZDll",
+    "Liar Game": "https://t.me/+ki2AYsqJafs2NDk1",
+    "demon slayer": "https://t.me/DemonSlayerChannel",
+}
+
+DEFAULT_CHANNEL_LINK = "https://t.me/YourDefaultChannel"
+
+
+def get_anime_channel_link(anime_name):
+    anime_name = anime_name.lower().strip()
+
+    for anime, link in ANIME_CHANNEL_LINKS.items():
+        if anime in anime_name:
+            return link
+
+    return DEFAULT_CHANNEL_LINK 
+
 
 def main():
     Thread(
@@ -298,6 +320,15 @@ def main():
         ],
         drop_pending_updates=False,
     )
+
+def get_anime_poster_url(anime_name):
+    anime_name = anime_name.lower().strip()
+
+    for anime, poster_url in ANIME_POSTERS.items():
+        if anime in anime_name:
+            return poster_url
+
+    return DEFAULT_POSTER_URL
 
 
 if __name__ == "__main__":
