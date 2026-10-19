@@ -312,7 +312,7 @@ async def handle_channel_post(
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "🔥 JOiIN NOW 🔥",
+                "🔥 JOIN NOW 🔥",
                 url=anime_link,
             )
         ]
