@@ -228,7 +228,7 @@ except Exception:
     source_link = get_source_link(message)
 
     # Join_url: original source post link
-        join_url = source_link
+       
 
     announcement = (
         "╭━━━『 🔥 NEW EPISODE 』━━━╮\n\n"
