@@ -3,7 +3,6 @@ import re
 import logging
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
-from urllib.parse import urlparse
 
 from telegram import (
     Update,
@@ -39,18 +38,6 @@ SOURCE_CHANNEL_IDS = [
     if channel.strip()
 ]
 
-# ==================== CUSTOM ANIME POSTERS ====================
-
-# ==================== ANIME POSTER URLS ====================
-
-ANIME_POSTERS = {
-    "Naruto Shippuden": "https://imgyx.pages.dev/VQw3e",
-    "Liar Game": "https://imgyx.pages.dev/sjYWT",
-    "Blue Box": "https://example.com/one-piece.jpg",
-}
-
-DEFAULT_POSTER_URL = "https://example.com/default-anime.jpg"
-
 PORT = int(os.getenv("PORT", "10000"))
 
 if not BOT_TOKEN:
@@ -62,7 +49,40 @@ if not MAIN_CHANNEL_ID:
 if not SOURCE_CHANNEL_IDS:
     raise ValueError("SOURCE_CHANNEL_IDS is missing from environment variables!")
 
+# ==================== ANIME CHANNEL LINKS ====================
+# Add each anime's real channel link here.
+# Names are matched without regard to capitalization.
+
+ANIME_CHANNEL_LINKS = {
+    "naruto shippuden": "https://t.me/+uKuAaVBzmSs0ZDll",
+    "liar game": "https://t.me/+ki2AYsqJafs2NDk1",
+
+    # Replace this example with your real Demon Slayer channel link.
+    "demon slayer": "https://t.me/DemonSlayerChannel",
+
+    # Add more anime links below.
+    # "blue box": "https://t.me/YourBlueBoxChannel",
+}
+
+# Used when the detected anime doesn't match any entry.
+# Replace with a real fallback channel link.
+DEFAULT_CHANNEL_LINK = "https://t.me/YourDefaultChannel"
+
+# ==================== ANIME POSTER URLS ====================
+
+ANIME_POSTERS = {
+    "naruto shippuden": "https://imgyx.pages.dev/VQw3e",
+    "liar game": "https://imgyx.pages.dev/sjYWT",
+
+    # Replace this example with a real, direct image URL.
+    "blue box": "https://example.com/one-piece.jpg",
+}
+
+# Replace with a real, direct image URL.
+DEFAULT_POSTER_URL = "https://example.com/default-anime.jpg"
+
 # ==================== HEALTH CHECK SERVER ====================
+
 
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -81,12 +101,16 @@ class HealthHandler(BaseHTTPRequestHandler):
 
 
 def start_web_server():
-    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
-    logger.info("Health server listening on port %s", PORT)
-    server.serve_forever()
+    try:
+        server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
+        logger.info("Health server listening on port %s", PORT)
+        server.serve_forever()
+    except Exception:
+        logger.exception("Health server failed to start")
 
 
 # ==================== HELPERS ====================
+
 
 def normalize_channel_id(value):
     value = value.strip()
@@ -108,8 +132,8 @@ def source_is_allowed(chat):
 
     username = getattr(chat, "username", None)
 
-    if username and normalize_channel_id(username) in configured:
-        return True
+    if username:
+        return normalize_channel_id(username) in configured
 
     return False
 
@@ -123,12 +147,12 @@ def contains_episode(text):
 def get_source_link(message):
     chat = message.chat
 
-    # Public channels have links such as https://t.me/channelname/123
     if chat.username:
-        return f"https://t.me/{chat.username}/{message.message_id}"
+        return (
+            f"https://t.me/{chat.username}/"
+            f"{message.message_id}"
+        )
 
-    # Private supergroup/channel posts may have internal links.
-    # These links work only for eligible members.
     chat_id = str(chat.id)
 
     if chat_id.startswith("-100"):
@@ -145,59 +169,32 @@ def get_message_text(message):
     return message.text or message.caption or ""
 
 
-# ==================== COMMANDS ====================
+def get_anime_channel_link(anime_name):
+    anime_name = anime_name.lower().strip()
 
-async def start_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    if update.effective_message:
-        await update.effective_message.reply_text(
-            "👋 Welcome to Anime Auto Post Bot!\n\n"
-            "I detect posts containing the word Episode "
-            "in configured source channels.\n\n"
-            "When a matching post arrives, I announce it "
-            "in your main channel with a source button.\n\n"
-            "Use /status to check the bot configuration."
-        )
+    for anime, link in ANIME_CHANNEL_LINKS.items():
+        if anime.lower() in anime_name:
+            return link
+
+    return DEFAULT_CHANNEL_LINK
 
 
-async def status_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    if update.effective_message:
-        await update.effective_message.reply_text(
-            "✅ Anime Auto Post Bot is running.\n\n"
-            f"📢 Configured source channels: "
-            f"{len(SOURCE_CHANNEL_IDS)}\n"
-            "🔍 Keyword: Episode\n"
-            "💾 Database: Not required"
-        )
+def get_anime_poster_url(anime_name):
+    anime_name = anime_name.lower().strip()
+
+    for anime, poster_url in ANIME_POSTERS.items():
+        if anime.lower() in anime_name:
+            return poster_url
+
+    return DEFAULT_POSTER_URL
 
 
-# ==================== EPISODE DETECTION ====================
-
-poster_url = get_anime_poster_url(anime_name)
-
-try:
-    await context.bot.send_photo(
-        chat_id=MAIN_CHANNEL_ID,
-        photo=poster_url,
-        caption=announcement,
-        reply_markup=keyboard,
-    )
-
-    logger.info(
-        "Posted episode announcement for %s",
-        anime_name,
-    )
-
-except Exception:
-    logger.exception("Failed to publish episode announcement")
-
-    # Extract anime name and episode number
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+def extract_episode_details(text):
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
+    ]
 
     anime_name = "Unknown Anime"
     episode_number = "Unknown"
@@ -213,22 +210,96 @@ except Exception:
             episode_number = match.group(1)
             break
 
-    for line in lines:
+    # Look for an anime title on the line before Episode.
+    for index, line in enumerate(lines):
         if re.search(r"\bEpisode\b", line, re.IGNORECASE):
-            continue
+            if index > 0:
+                candidate = lines[index - 1]
 
-        if not re.search(
-            r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b",
-            line,
-            re.IGNORECASE,
-        ):
+                if not re.search(
+                    r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b",
+                    candidate,
+                    re.IGNORECASE,
+                ):
+                    anime_name = candidate
+            break
+
+    # Fallback: use the first line that isn't an episode or quality line.
+    if anime_name == "Unknown Anime":
+        for line in lines:
+            if re.search(r"\bEpisode\b", line, re.IGNORECASE):
+                continue
+
+            if re.search(
+                r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b",
+                line,
+                re.IGNORECASE,
+            ):
+                continue
+
             anime_name = line
             break
 
+    return anime_name, episode_number
+
+
+# ==================== COMMANDS ====================
+
+
+async def start_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    if update.effective_message:
+        await update.effective_message.reply_text(
+            "👋 Welcome to Anime Auto Post Bot!\n\n"
+            "I detect channel posts containing the word Episode.\n"
+            "Matching posts are announced in your main channel.\n\n"
+            "Each anime can have its own channel link and poster.\n\n"
+            "Use /status to check the bot."
+        )
+
+
+async def status_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    if update.effective_message:
+        await update.effective_message.reply_text(
+            "✅ Anime Auto Post Bot is running.\n\n"
+            f"📢 Configured source channels: "
+            f"{len(SOURCE_CHANNEL_IDS)}\n"
+            "🔍 Keyword: Episode\n"
+            "🗄️ Database: Not required"
+        )
+
+
+# ==================== EPISODE DETECTION ====================
+
+
+async def handle_channel_post(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    message = update.channel_post
+
+    if not message:
+        return
+
+    if not source_is_allowed(message.chat):
+        return
+
+    text = get_message_text(message)
+
+    if not text or not contains_episode(text):
+        return
+
+    anime_name, episode_number = extract_episode_details(text)
+
     source_link = get_source_link(message)
 
-    # Join_url: original source post link
-       
+    anime_link = get_anime_channel_link(anime_name)
+    poster_url = get_anime_poster_url(anime_name)
 
     announcement = (
         "╭━━━『 🔥 NEW EPISODE 』━━━╮\n\n"
@@ -241,19 +312,48 @@ except Exception:
         "👇 WATCH NOW 👇"
     )
 
-    anime_link = get_anime_channel_link(anime_name)
-
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔥 WATCH NOW 🔥", url=anime_link)]
+        [
+            InlineKeyboardButton(
+                "🔥 WATCH NOW 🔥",
+                url=anime_link,
+            )
+        ]
     ])
 
     try:
-        await context.bot.send_message(
-            chat_id=MAIN_CHANNEL_ID,
-            text=announcement,
-            reply_markup=keyboard,
-            disable_web_page_preview=True,
-        )
+        # Try posting with the anime-specific poster.
+        if poster_url and not poster_url.startswith(
+            "https://example.com/"
+        ):
+            try:
+                await context.bot.send_photo(
+                    chat_id=MAIN_CHANNEL_ID,
+                    photo=poster_url,
+                    caption=announcement,
+                    reply_markup=keyboard,
+                )
+            except Exception:
+                logger.warning(
+                    "Poster failed for %s; sending text instead.",
+                    anime_name,
+                    exc_info=True,
+                )
+
+                await context.bot.send_message(
+                    chat_id=MAIN_CHANNEL_ID,
+                    text=announcement,
+                    reply_markup=keyboard,
+                    disable_web_page_preview=True,
+                )
+        else:
+            # Don't try to send placeholder image URLs.
+            await context.bot.send_message(
+                chat_id=MAIN_CHANNEL_ID,
+                text=announcement,
+                reply_markup=keyboard,
+                disable_web_page_preview=True,
+            )
 
         logger.info(
             "Episode %s announcement sent for %s",
@@ -263,24 +363,9 @@ except Exception:
 
     except Exception:
         logger.exception("Failed to publish episode announcement")
+
+
 # ==================== MAIN ====================
-ANIME_CHANNEL_LINKS = {
-    "Naruto Shippuden": "https://t.me/+uKuAaVBzmSs0ZDll",
-    "Liar Game": "https://t.me/+ki2AYsqJafs2NDk1",
-    "demon slayer": "https://t.me/DemonSlayerChannel",
-}
-
-DEFAULT_CHANNEL_LINK = "https://t.me/YourDefaultChannel"
-
-
-def get_anime_channel_link(anime_name):
-    anime_name = anime_name.lower().strip()
-
-    for anime, link in ANIME_CHANNEL_LINKS.items():
-        if anime in anime_name:
-            return link
-
-    return DEFAULT_CHANNEL_LINK 
 
 
 def main():
@@ -289,7 +374,11 @@ def main():
         daemon=True,
     ).start()
 
-    application = Application.builder().token(BOT_TOKEN).build()
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .build()
+    )
 
     application.add_handler(
         CommandHandler("start", start_command)
@@ -315,15 +404,6 @@ def main():
         ],
         drop_pending_updates=False,
     )
-
-def get_anime_poster_url(anime_name):
-    anime_name = anime_name.lower().strip()
-
-    for anime, poster_url in ANIME_POSTERS.items():
-        if anime in anime_name:
-            return poster_url
-
-    return DEFAULT_POSTER_URL
 
 
 if __name__ == "__main__":
