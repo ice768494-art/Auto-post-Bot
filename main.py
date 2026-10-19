@@ -189,49 +189,79 @@ async def handle_channel_post(
         or str(message.chat.id)
     )
 
+    # Extract anime name and episode number
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    anime_name = "Unknown Anime"
+    episode_number = "Unknown"
+
+    for line in lines:
+        match = re.search(
+            r"\bEpisode\s*[:#-]?\s*(\d+(?:\.\d+)?)",
+            line,
+            flags=re.IGNORECASE,
+        )
+
+        if match:
+            episode_number = match.group(1)
+            break
+
+    for line in lines:
+        if re.search(r"\bEpisode\b", line, re.IGNORECASE):
+            continue
+
+        if not re.search(
+            r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b",
+            line,
+            re.IGNORECASE,
+        ):
+            anime_name = line
+            break
+
     source_link = get_source_link(message)
 
+    # Join_url: original source post link
+    join_url = source_link
+
     announcement = (
-        "🔥 <b>NEW ANIME EPISODE</b>\n\n"
-        f"📢 <b>Source:</b> {source_name}\n\n"
-        "📝 <b>Original Post:</b>\n"
-        f"{source_link if source_link else 'Link unavailable'}"
+        "╭━━━『 🔥 NEW EPISODE 』━━━╮\n\n"
+        f"🎬 Anime: {anime_name}\n"
+        f"📺 Episode: {episode_number}\n"
+        "🎧 Audio: Tamil\n\n"
+        "╰━━━━━━━━━━━━━━━━━━╯\n\n"
+        "⚡ Quality: 480p | 720p | 1080p\n\n"
+        "📢 Channel: AnimeNetworkTamil\n\n"
+        "👇 WATCH NOW 👇"
     )
 
     keyboard = None
 
-    if source_link:
-        keyboard = InlineKeyboardMarkup(
+    if join_url:
+        keyboard = InlineKeyboardMarkup([
             [
-                [
-                    InlineKeyboardButton(
-                        "📥 VIEW EPISODE",
-                        url=source_link,
-                    )
-                ]
+                InlineKeyboardButton(
+                    "🔥 JOIN NOW 🔥",
+                    url=join_url,
+                )
             ]
-        )
+        ])
 
     try:
         await context.bot.send_message(
             chat_id=MAIN_CHANNEL_ID,
             text=announcement,
-            parse_mode="HTML",
             reply_markup=keyboard,
             disable_web_page_preview=True,
         )
 
         logger.info(
-            "Episode announcement sent from %s, message %s",
-            source_name,
-            message.message_id,
+            "Episode %s announcement sent for %s",
+            episode_number,
+            anime_name,
         )
 
     except Exception:
-        logger.exception(
-            "Failed to send announcement for channel %s",
-            message.chat.id,
-        )
+        logger.exception("Failed to publish episode announcement")
 
 
 # ==================== MAIN ====================
