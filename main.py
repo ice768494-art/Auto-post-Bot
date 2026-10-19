@@ -228,7 +228,7 @@ except Exception:
     source_link = get_source_link(message)
 
     # Join_url: original source post link
-    join_url = source_link
+        join_url = source_link
 
     announcement = (
         "╭━━━『 🔥 NEW EPISODE 』━━━╮\n\n"
@@ -241,14 +241,11 @@ except Exception:
         "👇 WATCH NOW 👇"
     )
 
-    keyboard = None
+    anime_link = get_anime_channel_link(anime_name)
 
-    if join_url:
-        anime_link = get_anime_channel_link(anime_name)
-
-keyboard = InlineKeyboardMarkup([
-    [InlineKeyboardButton("🔥 WATCH NOW 🔥", url=anime_link)]
-])
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔥 WATCH NOW 🔥", url=anime_link)]
+    ])
 
     try:
         await context.bot.send_message(
@@ -266,8 +263,6 @@ keyboard = InlineKeyboardMarkup([
 
     except Exception:
         logger.exception("Failed to publish episode announcement")
-
-
 # ==================== MAIN ====================
 ANIME_CHANNEL_LINKS = {
     "Naruto Shippuden": "https://t.me/+uKuAaVBzmSs0ZDll",
