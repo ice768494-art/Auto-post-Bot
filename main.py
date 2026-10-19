@@ -307,15 +307,12 @@ async def handle_channel_post(
         f"📺 Episode: {episode_number}\n"
         "🎧 Audio: Tamil\n\n"
         "╰━━━━━━━━━━━━━━━━━━╯\n\n"
-        "⚡ Quality: 480p | 720p | 1080p\n\n"
-        "📢 Channel: AnimeNetworkTamil\n\n"
-        "👇 WATCH NOW 👇"
     )
 
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "🔥 WATCH NOW 🔥",
+                "🔥 JOiIN NOW 🔥",
                 url=anime_link,
             )
         ]
