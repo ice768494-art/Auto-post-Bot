@@ -238,7 +238,7 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 keyboard = InlineKeyboardMarkup(buttons)
 
-    try:
+try:
         if poster_url:
             try:
                 await context.bot.send_photo(
