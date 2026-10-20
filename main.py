@@ -216,29 +216,29 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         "╰━━━━━━━━━━━━━━━━━━╯"
     )
 
-    # ==================== COLOURED INLINE BUTTONS ====================
+    # ==================== INLINE BUTTONS ====================
     buttons = [
-    [
-        InlineKeyboardButton(
-            "♧ • ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ • ♧",
-            url=source_link or anime_link,
-        )
-    ],
-    [
-        InlineKeyboardButton(
-            "↪ SHARE CHANNEL",
-            url="https://t.me/AnimeNetworkTamil",
-        ),
-        InlineKeyboardButton(
-            "⚠ ANY ISSUES ⚠",
-            url="https://t.me/Tamil_Animes_New",
-        ),
-    ],
-]
+        [
+            InlineKeyboardButton(
+                "♧ • ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ • ♧",
+                url=source_link or anime_link,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "↪ SHARE CHANNEL",
+                url="https://t.me/AnimeNetworkTamil",
+            ),
+            InlineKeyboardButton(
+                "⚠ ANY ISSUES ⚠",
+                url="https://t.me/Tamil_Animes_New",
+            ),
+        ],
+    ]
 
-keyboard = InlineKeyboardMarkup(buttons)
+    keyboard = InlineKeyboardMarkup(buttons)
 
-try:
+    try:
         if poster_url:
             try:
                 await context.bot.send_photo(
@@ -290,12 +290,11 @@ try:
             anime_name,
         )
 
-       except Exception:
+    except Exception:
         logger.exception(
             "Failed to publish episode announcement to MAIN_CHANNEL_ID=%s",
             MAIN_CHANNEL_ID,
         )
-
 
 # ==================== MAIN ====================
 
