@@ -232,23 +232,27 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Telegram Bot API does not support custom inline-button background colors.
     # This layout matches the screenshot: one full-width row, then two side-by-side.
     buttons = [
-        [
-            InlineKeyboardButton(
-                "• ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ •",
-                url=anime_link,
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "↪ SHARE CHANNEL",
-                url="https://t.me/AnimeNetworkTamil",
-            ),
-            InlineKeyboardButton(
-                "⚠️ ANY ISSUES ⚠️",
-                url="https://t.me/Tamil_Animes_New",
-            ),
-        ],
-    ]
+    [
+        InlineKeyboardButton(
+            "• ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ •",
+            url=anime_link,
+            style="success",
+        )
+    ],
+    [
+        InlineKeyboardButton(
+            "↪ SHARE CHANNEL",
+            url="https://t.me/AnimeNetworkTamil",
+            style="primary",
+        ),
+        InlineKeyboardButton(
+            "⚠️ ANY ISSUES ⚠️",
+            url="https://t.me/Tamil_Animes_New",
+            style="danger",
+        ),
+    ],
+]
+
     keyboard = InlineKeyboardMarkup(buttons)
 
     try:
