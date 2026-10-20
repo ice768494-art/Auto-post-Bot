@@ -235,17 +235,17 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         [
             InlineKeyboardButton(
                 "📺 • ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ • 📺",
-                url=anime_link,
+                url=anime_link,style="primary",
             )
         ],
         [
             InlineKeyboardButton(
                 "↪ SHARE CHANNEL",
-                url="https://t.me/AnimeNetworkTamil",
+                url="https://t.me/AnimeNetworkTamil",style="succes",
             ),
             InlineKeyboardButton(
                 "⚠️ ANY ISSUES ⚠️",
-                url="https://t.me/Tamil_Animes_New",
+                url="https://t.me/Tamil_Animes_New",style="danger",
             ),
         ],
     ]
