@@ -212,7 +212,7 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     buttons = [[InlineKeyboardButton("•ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ•", url=anime_link)]]
     if source_link:
-        buttons.append([InlineKeyboardButton("📥 View Source Post", url=source_link)])
+        buttons.append([InlineKeyboardButton("📥 ᴡᴀᴛᴄʜ ɴᴏᴡ 👀", url=source_link)])
     keyboard = InlineKeyboardMarkup(buttons)
 
     try:
