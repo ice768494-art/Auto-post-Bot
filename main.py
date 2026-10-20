@@ -313,10 +313,22 @@ async def handle_channel_post(
         "╰━━━━━━━━━━━━━━━━━━╯"
     )
 
+    poster_url = ANIME_POSTERS.get(anime_name.lower().strip())
+
+if poster_url:
+    await context.bot.send_photo(
+        chat_id=CHANNEL_ID,
+        photo=poster_url,
+        caption=message,
+        parse_mode="HTML"
+    )
+else:
+    logger.warning(f"No poster found for anime: {anime_name}")
+
     await context.bot.send_message(
-    chat_id=CHANNEL_ID,
-    text=message,
-    parse_mode="HTML"
+        chat_id=CHANNEL_ID,
+        text=message,
+        parse_mode="HTML"
     )
     keyboard = InlineKeyboardMarkup([
         [
