@@ -44,20 +44,19 @@ ANIME_CHANNEL_LINKS = {
     "naruto shippuden": "https://t.me/+uKuAaVBzmSs0ZDll",
     "liar game": "https://t.me/+ki2AYsqJafs2NDk1",
     "the laid-off cheat-granting mage enjoys a second lease on life": "https://t.me/+Sij9-LGXOmFjYTA1",
-    # Replace example links with your real channel links.
+    # Replace this example link with your real Demon Slayer channel link.
     "demon slayer": "https://t.me/DemonSlayerChannel",
 }
-DEFAULT_CHANNEL_LINK = "https://t.me/AnimeNetworkTamil"  # Replace with a real link.
+DEFAULT_CHANNEL_LINK = "https://t.me/AnimeNetworkTamil"
 
 # ==================== ANIME POSTER URLS ====================
-# Telegram must be able to fetch each URL as an actual image file.
+# Each URL should resolve directly to an image Telegram can fetch.
 ANIME_POSTERS = {
     "naruto shippuden": "https://imgyx.pages.dev/VQw3e",
     "liar game": "https://imgyx.pages.dev/sjYWT",
     "the laid-off cheat-granting mage enjoys a second lease on life": "https://imgyx.pages.dev/67la6",
-    # Add direct image URLs, e.g. https://example.org/poster.jpg
 }
-DEFAULT_POSTER_URL = ""  # Optional direct image URL; leave empty to post text only.
+DEFAULT_POSTER_URL = ""
 
 # ==================== HEALTH CHECK SERVER ====================
 class HealthHandler(BaseHTTPRequestHandler):
@@ -82,6 +81,7 @@ def start_web_server():
         server.serve_forever()
     except Exception:
         logger.exception("Health server failed to start")
+
 
 # ==================== HELPERS ====================
 def normalize_channel_id(value):
@@ -121,7 +121,8 @@ def get_message_text(message):
 def get_matching_value(mapping, anime_name):
     normalized = anime_name.lower().strip()
     for title, value in mapping.items():
-        if title.lower() in normalized or normalized in title.lower():
+        title_normalized = title.lower().strip()
+        if title_normalized in normalized or normalized in title_normalized:
             return value
     return None
 
@@ -140,7 +141,11 @@ def extract_episode_details(text):
     episode_number = "Unknown"
 
     for line in lines:
-        match = re.search(r"\bEpisode\s*[:#-]?\s*(\d+(?:\.\d+)?)", line, re.IGNORECASE)
+        match = re.search(
+            r"\bEpisode\s*[:#-]?\s*(\d+(?:\.\d+)?)",
+            line,
+            re.IGNORECASE,
+        )
         if match:
             episode_number = match.group(1)
             break
@@ -149,7 +154,11 @@ def extract_episode_details(text):
         if re.search(r"\bEpisode\b", line, re.IGNORECASE):
             if index > 0:
                 candidate = lines[index - 1]
-                if not re.search(r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b", candidate, re.IGNORECASE):
+                if not re.search(
+                    r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b",
+                    candidate,
+                    re.IGNORECASE,
+                ):
                     anime_name = candidate
             break
 
@@ -157,11 +166,17 @@ def extract_episode_details(text):
         for line in lines:
             if re.search(r"\bEpisode\b", line, re.IGNORECASE):
                 continue
-            if re.search(r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b", line, re.IGNORECASE):
+            if re.search(
+                r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b",
+                line,
+                re.IGNORECASE,
+            ):
                 continue
             anime_name = line
             break
+
     return anime_name, episode_number
+
 
 # ==================== COMMANDS ====================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -184,10 +199,10 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🗄️ Database: Not required"
         )
 
+
 # ==================== EPISODE DETECTION ====================
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     source_message = update.channel_post
-
     if not source_message:
         return
 
@@ -199,12 +214,10 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     original_text = get_message_text(source_message)
-
     if not original_text or not contains_episode(original_text):
         return
 
     anime_name, episode_number = extract_episode_details(original_text)
-    source_link = get_source_link(source_message)
     anime_link = get_anime_channel_link(anime_name)
     poster_url = get_anime_poster_url(anime_name)
 
@@ -216,11 +229,12 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         "╰━━━━━━━━━━━━━━━━━━╯"
     )
 
-    # ==================== INLINE BUTTONS ====================
+    # Telegram Bot API does not support custom inline-button background colors.
+    # This layout matches the screenshot: one full-width row, then two side-by-side.
     buttons = [
         [
             InlineKeyboardButton(
-                "♧ • ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ • ♧",
+                "📺 • ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ • 📺",
                 url=anime_link,
             )
         ],
@@ -230,12 +244,11 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
                 url="https://t.me/AnimeNetworkTamil",
             ),
             InlineKeyboardButton(
-                "⚠ ANY ISSUES ⚠",
+                "⚠️ ANY ISSUES ⚠️",
                 url="https://t.me/Tamil_Animes_New",
             ),
         ],
     ]
-
     keyboard = InlineKeyboardMarkup(buttons)
 
     try:
@@ -248,12 +261,7 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
                     parse_mode="HTML",
                     reply_markup=keyboard,
                 )
-
-                logger.info(
-                    "Posted episode with poster for %s",
-                    anime_name,
-                )
-
+                logger.info("Posted episode with poster for %s", anime_name)
             except Exception:
                 logger.warning(
                     "Could not send poster for %s; falling back to text. "
@@ -261,7 +269,6 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
                     anime_name,
                     exc_info=True,
                 )
-
                 await context.bot.send_message(
                     chat_id=MAIN_CHANNEL_ID,
                     text=announcement,
@@ -269,13 +276,8 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
                     reply_markup=keyboard,
                     disable_web_page_preview=True,
                 )
-
         else:
-            logger.warning(
-                "No poster URL configured for anime: %s",
-                anime_name,
-            )
-
+            logger.warning("No poster URL configured for anime: %s", anime_name)
             await context.bot.send_message(
                 chat_id=MAIN_CHANNEL_ID,
                 text=announcement,
@@ -289,32 +291,25 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
             episode_number,
             anime_name,
         )
-
     except Exception:
         logger.exception(
             "Failed to publish episode announcement to MAIN_CHANNEL_ID=%s",
             MAIN_CHANNEL_ID,
         )
 
-# ==================== MAIN ====================
 
+# ==================== MAIN ====================
 def main():
     Thread(target=start_web_server, daemon=True).start()
 
     application = Application.builder().token(BOT_TOKEN).build()
-
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("status", status_command))
-
     application.add_handler(
-        MessageHandler(
-            filters.UpdateType.CHANNEL_POST,
-            handle_channel_post,
-        )
+        MessageHandler(filters.UpdateType.CHANNEL_POST, handle_channel_post)
     )
 
     logger.info("Anime Auto Post Bot starting...")
-
     application.run_polling(
         allowed_updates=["message", "channel_post"],
         drop_pending_updates=False,
