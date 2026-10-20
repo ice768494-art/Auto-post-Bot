@@ -311,10 +311,10 @@ async def handle_channel_post(
         "╰━━━━━━━━━━━━━━━━━━╯"
     )
 
-    await bot.send_message(
-        chat_id=CHANNEL_ID,
-        text=message,
-        parse_mode="HTML"
+    await context.bot.send_message(
+    chat_id=CHANNEL_ID,
+    text=message,
+    parse_mode="HTML"
     )
     keyboard = InlineKeyboardMarkup([
         [
