@@ -235,6 +235,7 @@ buttons = [
 ]
 
 keyboard = InlineKeyboardMarkup(buttons)
+
     try:
         # Attach the same keyboard whether the post uses a poster or text fallback.
         if poster_url:
@@ -246,13 +247,19 @@ keyboard = InlineKeyboardMarkup(buttons)
                     parse_mode="HTML",
                     reply_markup=keyboard,
                 )
-                logger.info("Posted episode with poster for %s", anime_name)
+                logger.info(
+                    "Posted episode with poster for %s",
+                    anime_name,
+                )
+
             except Exception:
                 logger.warning(
-                    "Could not send poster for %s; falling back to text. Check that the URL is a direct image URL.",
+                    "Could not send poster for %s; falling back to text. "
+                    "Check that the URL is a direct image URL.",
                     anime_name,
                     exc_info=True,
                 )
+
                 await context.bot.send_message(
                     chat_id=MAIN_CHANNEL_ID,
                     text=announcement,
@@ -260,8 +267,13 @@ keyboard = InlineKeyboardMarkup(buttons)
                     reply_markup=keyboard,
                     disable_web_page_preview=True,
                 )
+
         else:
-            logger.warning("No poster URL configured for anime: %s", anime_name)
+            logger.warning(
+                "No poster URL configured for anime: %s",
+                anime_name,
+            )
+
             await context.bot.send_message(
                 chat_id=MAIN_CHANNEL_ID,
                 text=announcement,
@@ -270,20 +282,38 @@ keyboard = InlineKeyboardMarkup(buttons)
                 disable_web_page_preview=True,
             )
 
-        logger.info("Episode %s announcement sent for %s", episode_number, anime_name)
+        logger.info(
+            "Episode %s announcement sent for %s",
+            episode_number,
+            anime_name,
+        )
+
     except Exception:
-        logger.exception("Failed to publish episode announcement to MAIN_CHANNEL_ID=%s", MAIN_CHANNEL_ID)
+        logger.exception(
+            "Failed to publish episode announcement to MAIN_CHANNEL_ID=%s",
+            MAIN_CHANNEL_ID,
+        )
+
 
 # ==================== MAIN ====================
+
 def main():
     Thread(target=start_web_server, daemon=True).start()
+
     application = Application.builder().token(BOT_TOKEN).build()
+
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("status", status_command))
+
     application.add_handler(
-        MessageHandler(filters.UpdateType.CHANNEL_POST, handle_channel_post)
+        MessageHandler(
+            filters.UpdateType.CHANNEL_POST,
+            handle_channel_post,
+        )
     )
+
     logger.info("Anime Auto Post Bot starting...")
+
     application.run_polling(
         allowed_updates=["message", "channel_post"],
         drop_pending_updates=False,
