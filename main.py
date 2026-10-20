@@ -31,7 +31,9 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 MAIN_CHANNEL_ID = os.getenv("MAIN_CHANNEL_ID", "").strip()
+import os
 
+CHANNEL_ID = os.getenv("CHANNEL_ID")
 SOURCE_CHANNEL_IDS = [
     channel.strip()
     for channel in os.getenv("SOURCE_CHANNEL_IDS", "").split(",")
