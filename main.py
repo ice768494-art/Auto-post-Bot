@@ -44,6 +44,7 @@ ANIME_CHANNEL_LINKS = {
     "naruto shippuden": "https://t.me/+uKuAaVBzmSs0ZDll",
     "liar game": "https://t.me/+ki2AYsqJafs2NDk1",
     "the laid-off cheat-granting mage enjoys a second lease on life": "https://t.me/+Sij9-LGXOmFjYTA1",
+    "Tomb Raider King" : "https://t.me/+1d2421FenfNlZGM9",
     # Replace this example link with your real Demon Slayer channel link.
     "demon slayer": "https://t.me/DemonSlayerChannel",
 }
@@ -55,6 +56,7 @@ ANIME_POSTERS = {
     "naruto shippuden": "https://imgyx.pages.dev/VQw3e",
     "liar game": "https://imgyx.pages.dev/sjYWT",
     "the laid-off cheat-granting mage enjoys a second lease on life": "https://imgyx.pages.dev/67la6",
+    "Tomb Raider King":"https://imgyx.pages.dev/gKj9J",
 }
 DEFAULT_POSTER_URL = ""
 
@@ -241,12 +243,12 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     ],
     [
         InlineKeyboardButton(
-            "↪ SHARE CHANNEL",
+            "↪ ꜱʜᴀʀᴇ ᴄʜᴀɴɴᴇʟ",
             url="https://t.me/AnimeNetworkTamil",
             style="primary",
         ),
         InlineKeyboardButton(
-            "⚠️ ANY ISSUES ⚠️",
+            "⚠️ ᴀɴʏ ɪꜱꜱᴜᴇꜱ ⚠️",
             url="https://t.me/Tamil_Animes_New",
             style="danger",
         ),
