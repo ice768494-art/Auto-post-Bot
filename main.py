@@ -218,31 +218,25 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # ==================== COLOURED INLINE BUTTONS ====================
     buttons = [
-        [
-            InlineKeyboardButton(
-                "♧ • ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ • ♧",
-                url=source_link or anime_link,
-                style="primary",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "↪ SHARE CHANNEL",
-                url=anime_link,
-                style="success",
-            ),
-            InlineKeyboardButton(
-                "⚠ ANY ISSUES ⚠",
-                url=os.getenv(
-                    "SUPPORT_LINK",
-                    "https://t.me/AnimeNetworkTamil",
-                ),
-                style="danger",
-            ),
-        ],
-    ]
+    [
+        InlineKeyboardButton(
+            "♧ • ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ • ♧",
+            url=source_link or anime_link,
+        )
+    ],
+    [
+        InlineKeyboardButton(
+            "↪ SHARE CHANNEL",
+            url="https://t.me/AnimeNetworkTamil",
+        ),
+        InlineKeyboardButton(
+            "⚠ ANY ISSUES ⚠",
+            url="https://t.me/Tamil_Animes_New",
+        ),
+    ],
+]
 
-    keyboard = InlineKeyboardMarkup(buttons)
+keyboard = InlineKeyboardMarkup(buttons)
 
     try:
         if poster_url:
