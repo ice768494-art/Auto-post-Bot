@@ -210,11 +210,31 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         "╰━━━━━━━━━━━━━━━━━━╯"
     )
 
-    buttons = [[InlineKeyboardButton("•ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ•", url=anime_link)]]
-    if source_link:
-        buttons.append([InlineKeyboardButton("📥 ᴡᴀᴛᴄʜ ɴᴏᴡ 👀", url=source_link)])
-    keyboard = InlineKeyboardMarkup(buttons)
+    # ==================== COLOURED INLINE BUTTONS ====================
 
+buttons = [
+    [
+        InlineKeyboardButton(
+            "♧ • ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ • ♧",
+            url=source_link or anime_link,
+            style="primary",
+        )
+    ],
+    [
+        InlineKeyboardButton(
+            "↪ SHARE CHANNEL",
+            url=anime_link,
+            style="success",
+        ),
+        InlineKeyboardButton(
+            "⚠ ANY ISSUES ⚠",
+            url=os.getenv("SUPPORT_LINK", "https://t.me/AnimeNetworkTamil"),
+            style="danger",
+        ),
+    ],
+]
+
+keyboard = InlineKeyboardMarkup(buttons)
     try:
         # Attach the same keyboard whether the post uses a poster or text fallback.
         if poster_url:
