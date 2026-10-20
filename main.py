@@ -56,6 +56,7 @@ if not SOURCE_CHANNEL_IDS:
 ANIME_CHANNEL_LINKS = {
     "naruto shippuden": "https://t.me/+uKuAaVBzmSs0ZDll",
     "liar game": "https://t.me/+ki2AYsqJafs2NDk1",
+    "The Laid-Off Cheat-Granting Mage Enjoys a Second Lease on Life": "https://t.me/+eTVqRdOIZPQxZDc1"
 
     # Replace this example with your real Demon Slayer channel link.
     "demon slayer": "https://t.me/DemonSlayerChannel",
@@ -73,6 +74,7 @@ DEFAULT_CHANNEL_LINK = "https://t.me/YourDefaultChannel"
 ANIME_POSTERS = {
     "naruto shippuden": "https://imgyx.pages.dev/VQw3e",
     "liar game": "https://imgyx.pages.dev/sjYWT",
+    "The Laid-Off Cheat-Granting Mage Enjoys a Second Lease on Life": "https://imgyx.pages.dev/67la6"
 
     # Replace this example with a real, direct image URL.
     "blue box": "https://example.com/one-piece.jpg",
@@ -302,17 +304,25 @@ async def handle_channel_post(
     poster_url = get_anime_poster_url(anime_name)
 
     announcement = (
-        "╭━━━『 🔥 NEW EPISODE 』━━━╮\n\n"
-        f"🎬 Anime: {anime_name}\n"
-        f"📺 Episode: {episode_number}\n"
-        "🎧 Audio: Tamil\n\n"
-        "╰━━━━━━━━━━━━━━━━━━╯\n\n"
+        message = (
+    "╭━━━『 🔥 NEW EPISODE 』━━━╮\n\n"
+    f"<blockquote>🎬 Anime: {anime_name}\n"
+    f"📺 Episode: {episode_number}\n"
+    "🎧 Audio: Tamil</blockquote>\n\n"
+    "╰━━━━━━━━━━━━━━━━━━╯"
+)
+
+await bot.send_message(
+    chat_id=CHANNEL_ID,
+    text=message,
+    parse_mode="HTML"
+)
     )
 
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "🔥 JOIN NOW 🔥",
+                "•ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ•",
                 url=anime_link,
             )
         ]
