@@ -187,13 +187,19 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== EPISODE DETECTION ====================
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     source_message = update.channel_post
+
     if not source_message:
         return
+
     if not source_is_allowed(source_message.chat):
-        logger.info("Ignoring post from unconfigured source channel %s", source_message.chat.id)
+        logger.info(
+            "Ignoring post from unconfigured source channel %s",
+            source_message.chat.id,
+        )
         return
 
     original_text = get_message_text(source_message)
+
     if not original_text or not contains_episode(original_text):
         return
 
@@ -211,32 +217,34 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
     # ==================== COLOURED INLINE BUTTONS ====================
+    buttons = [
+        [
+            InlineKeyboardButton(
+                "♧ • ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ • ♧",
+                url=source_link or anime_link,
+                style="primary",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "↪ SHARE CHANNEL",
+                url=anime_link,
+                style="success",
+            ),
+            InlineKeyboardButton(
+                "⚠ ANY ISSUES ⚠",
+                url=os.getenv(
+                    "SUPPORT_LINK",
+                    "https://t.me/AnimeNetworkTamil",
+                ),
+                style="danger",
+            ),
+        ],
+    ]
 
-buttons = [
-    [
-        InlineKeyboardButton(
-            "♧ • ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ • ♧",
-            url=source_link or anime_link,
-            style="primary",
-        )
-    ],
-    [
-        InlineKeyboardButton(
-            "↪ SHARE CHANNEL",
-            url=anime_link,
-            style="success",
-        ),
-        InlineKeyboardButton(
-            "⚠ ANY ISSUES ⚠",
-            url=os.getenv("SUPPORT_LINK", "https://t.me/AnimeNetworkTamil"),
-            style="danger",
-        ),
-    ],
-]
+    keyboard = InlineKeyboardMarkup(buttons)
 
-keyboard = InlineKeyboardMarkup(buttons)
-try:
-        # Attach the same keyboard whether the post uses a poster or text fallback.
+    try:
         if poster_url:
             try:
                 await context.bot.send_photo(
@@ -246,6 +254,7 @@ try:
                     parse_mode="HTML",
                     reply_markup=keyboard,
                 )
+
                 logger.info(
                     "Posted episode with poster for %s",
                     anime_name,
@@ -287,7 +296,7 @@ try:
             anime_name,
         )
 
-except Exception:
+    except Exception:
         logger.exception(
             "Failed to publish episode announcement to MAIN_CHANNEL_ID=%s",
             MAIN_CHANNEL_ID,
