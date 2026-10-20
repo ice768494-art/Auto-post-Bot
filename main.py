@@ -43,11 +43,11 @@ if not SOURCE_CHANNEL_IDS:
 ANIME_CHANNEL_LINKS = {
     "naruto shippuden": "https://t.me/+uKuAaVBzmSs0ZDll",
     "liar game": "https://t.me/+ki2AYsqJafs2NDk1",
-    "the laid-off cheat-granting mage enjoys a second lease on life": "https://t.me/+eTVqRdOIZPQxZDc1",
+    "the laid-off cheat-granting mage enjoys a second lease on life": "https://t.me/+Sij9-LGXOmFjYTA1",
     # Replace example links with your real channel links.
     "demon slayer": "https://t.me/DemonSlayerChannel",
 }
-DEFAULT_CHANNEL_LINK = "https://t.me/YourDefaultChannel"  # Replace with a real link.
+DEFAULT_CHANNEL_LINK = "https://t.me/AnimeNetworkTamil"  # Replace with a real link.
 
 # ==================== ANIME POSTER URLS ====================
 # Telegram must be able to fetch each URL as an actual image file.
