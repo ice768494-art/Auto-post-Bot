@@ -303,7 +303,7 @@ async def handle_channel_post(
     anime_link = get_anime_channel_link(anime_name)
     poster_url = get_anime_poster_url(anime_name)
 
-        message = (
+            message = (
         "╭━━━『 🔥 NEW EPISODE 』━━━╮\n\n"
         f"<blockquote>🎬 Anime: {anime_name}\n"
         f"📺 Episode: {episode_number}\n"
