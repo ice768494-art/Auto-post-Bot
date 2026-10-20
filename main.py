@@ -287,7 +287,7 @@ try:
             anime_name,
         )
 
-    except Exception:
+except Exception:
         logger.exception(
             "Failed to publish episode announcement to MAIN_CHANNEL_ID=%s",
             MAIN_CHANNEL_ID,
