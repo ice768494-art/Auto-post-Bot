@@ -235,8 +235,7 @@ buttons = [
 ]
 
 keyboard = InlineKeyboardMarkup(buttons)
-
-    try:
+try:
         # Attach the same keyboard whether the post uses a poster or text fallback.
         if poster_url:
             try:
