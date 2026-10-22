@@ -234,8 +234,8 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     f"➤ Episode: {escape(episode_number)}\n"
     "➥ Quality: Multi Quality [Tamil Audio]\n"
     "──────────────────</blockquote>\n"
-    f"➽ NEW EPISODE {escape(episode_number)} ADDED 👇"
-    ""
+    f"➽ NEW EPISODE {escape(episode_number)} ADDED 👇" )
+  
 
     # Telegram Bot API does not support custom inline-button background colors.
     # This layout matches the screenshot: one full-width row, then two side-by-side.
