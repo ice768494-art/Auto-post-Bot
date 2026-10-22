@@ -45,6 +45,8 @@ ANIME_CHANNEL_LINKS = {
     "liar game": "https://t.me/+ki2AYsqJafs2NDk1",
     "the laid-off cheat-granting mage enjoys a second lease on life": "https://t.me/+Sij9-LGXOmFjYTA1",
     "Tomb Raider King" : "https://t.me/+1d2421FenfNlZGM9",
+    "The Exiled Heavy Knight Knows How To Game The System": "https://t.me/+SppUueMG-bdiMjI1",
+    "The Ramparts Of Ice" : "https://t.me/+eGLMJuQ2lTA4YTBl",
     # Replace this example link with your real Demon Slayer channel link.
     "demon slayer": "https://t.me/DemonSlayerChannel",
 }
@@ -57,6 +59,8 @@ ANIME_POSTERS = {
     "liar game": "https://imgyx.pages.dev/sjYWT",
     "the laid-off cheat-granting mage enjoys a second lease on life": "https://imgyx.pages.dev/67la6",
     "Tomb Raider King":"https://imgyx.pages.dev/gKj9J",
+    "The Exiled Heavy Knight Knows How To Game The System" : "https://imgyx.pages.dev/xNjX5",
+    "The Ramparts Of Ice" : "https://imgyx.pages.dev/cckx3",
 }
 DEFAULT_POSTER_URL = ""
 
@@ -224,12 +228,14 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     poster_url = get_anime_poster_url(anime_name)
 
     announcement = (
-        "╭━━━『 🔥 NEW EPISODE 』━━━╮\n\n"
-        f"<blockquote>🎬 Anime: {escape(anime_name)}\n"
-        f"📺 Episode: {escape(episode_number)}\n"
-        "🎧 Audio: Tamil</blockquote>\n\n"
-        "╰━━━━━━━━━━━━━━━━━━╯"
-    )
+        f"➪ {escape(anime_name)}\n"
+    "<blockquote>"
+    "──────────────────\n"
+    f"➤ Episode: {escape(episode_number)}\n"
+    "➥ Quality: Multi Quality [Tamil Audio]\n"
+    "──────────────────</blockquote>\n"
+    f"➽ NEW EPISODE {escape(episode_number)} ADDED 👇"
+    ""
 
     # Telegram Bot API does not support custom inline-button background colors.
     # This layout matches the screenshot: one full-width row, then two side-by-side.
