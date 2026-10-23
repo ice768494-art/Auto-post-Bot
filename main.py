@@ -47,6 +47,8 @@ ANIME_CHANNEL_LINKS = {
     "Tomb Raider King" : "https://t.me/+1d2421FenfNlZGM9",
     "The Exiled Heavy Knight Knows How To Game The System": "https://t.me/+SppUueMG-bdiMjI1",
     "The Ramparts Of Ice" : "https://t.me/+eGLMJuQ2lTA4YTBl",
+    "JoJo’s Bizarre Adventure Season 6 – Steel Ball Run" : "https://t.me/+4iT4nt1SFNE2Yzdl",
+    "The Apothecary Diaries" : "https://t.me/+Ab5t_ExrlXkyOTNl",
     # Replace this example link with your real Demon Slayer channel link.
     "demon slayer": "https://t.me/DemonSlayerChannel",
 }
@@ -61,6 +63,8 @@ ANIME_POSTERS = {
     "Tomb Raider King":"https://imgyx.pages.dev/gKj9J",
     "The Exiled Heavy Knight Knows How To Game The System" : "https://imgyx.pages.dev/xNjX5",
     "The Ramparts Of Ice" : "https://imgyx.pages.dev/cckx3",
+    "JoJo’s Bizarre Adventure Season 6 – Steel Ball Run" : "https://imgyx.pages.dev/NDUnT",
+    "The Apothecary Diaries" : "https://imgyx.pages.dev/JaNj9",
 }
 DEFAULT_POSTER_URL = ""
 
