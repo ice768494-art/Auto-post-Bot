@@ -150,9 +150,63 @@ def get_anime_poster_url(anime_name):
 
 
 def extract_episode_details(text):
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    anime_name = "Unknown Anime"
-    episode_number = "Unknown"
+lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+anime_name = "Unknown Anime"
+episode_number = "Unknown"
+season_number = "01"
+
+for line in lines:
+    episode_match = re.search(
+        r"\bEpisode\s*[:#-]?\s*(\d+(?:\.\d+)?)",
+        line,
+        re.IGNORECASE,
+    )
+
+    if episode_match:
+        episode_number = episode_match.group(1)
+
+    season_match = re.search(
+        r"\bSeason\s*[:#-]?\s*(\d+)",
+        line,
+        re.IGNORECASE,
+    )
+
+    if season_match:
+        season_number = season_match.group(1)
+
+for index, line in enumerate(lines):
+    if re.search(r"\bEpisode\b", line, re.IGNORECASE):
+        if index > 0:
+            candidate = lines[index - 1]
+
+            if not re.search(
+                r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b",
+                candidate,
+                re.IGNORECASE,
+            ):
+                anime_name = candidate
+        break
+
+if anime_name == "Unknown Anime":
+    for line in lines:
+        if re.search(r"\bEpisode\b", line, re.IGNORECASE):
+            continue
+
+        if re.search(
+            r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b",
+            line,
+            re.IGNORECASE,
+        ):
+            continue
+
+        if re.search(r"\bSeason\s*[:#-]?\s*\d+", line, re.IGNORECASE):
+            continue
+
+        anime_name = line
+        break
+
+return anime_name, episode_number, season_number
 
     for line in lines:
         match = re.search(
@@ -241,7 +295,7 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     "──────────────────\n"
     f"➤ Episode: {escape(episode_number)}\n"
     "➥ Quality: Multi Quality [Tamil Audio]\n"
-    "➥ Season : {escape(season_number)}\n"
+    f"➥ Season : {escape(season_number)}\n"
     "──────────────────\n"
     f"<blockquote>➽ NEW EPISODE {escape(episode_number)} ADDED 👇</blockquote>" )
   
