@@ -150,18 +150,18 @@ def get_anime_poster_url(anime_name):
 
 
 def extract_episode_details(text):
-lines = [line.strip() for line in text.splitlines() if line.strip()]
+   lines = [line.strip() for line in text.splitlines() if line.strip()]
 
-anime_name = "Unknown Anime"
-episode_number = "Unknown"
-season_number = "01"
+   anime_name = "Unknown Anime"
+   episode_number = "Unknown"
+   season_number = "01"
 
-for line in lines:
-    episode_match = re.search(
+   for line in lines:
+     episode_match = re.search(
         r"\bEpisode\s*[:#-]?\s*(\d+(?:\.\d+)?)",
         line,
         re.IGNORECASE,
-    )
+     )
     if episode_match:
         episode_number = episode_match.group(1)
 
