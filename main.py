@@ -51,6 +51,7 @@ ANIME_CHANNEL_LINKS = {
     "The Apothecary Diaries" : "https://t.me/+Ab5t_ExrlXkyOTNl",
     "A Wild Last Boss Appeared" : "https://t.me/+s6_zOzbnJ_UxMjk9",
     "Black Clover" : "https://t.me/+WTEdJxxK8OU0ODBl",
+    "Even Though I'm a Super Timid Noble Girl, I Accepted the Bet From My Cunning Fiancé" : "https://t.me/+iperfm4Spv0wMzI9",
     # Replace this example link with your real Demon Slayer channel link.
     "demon slayer": "https://t.me/DemonSlayerChannel",
 }
@@ -69,6 +70,7 @@ ANIME_POSTERS = {
     "The Apothecary Diaries" : "https://imgyx.pages.dev/JaNj9",
     "A Wild Last Boss Appeared" : "https://imgyx.pages.dev/HGBe4",
     "Black Clover" : "https://imgyx.pages.dev/PQ8rI",
+    "Even Though I'm a Super Timid Noble Girl, I Accepted the Bet From My Cunning Fiancé" : "https://imgyx.pages.dev/KhSAr",
 }
 DEFAULT_POSTER_URL = ""
 
