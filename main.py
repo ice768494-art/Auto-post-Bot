@@ -276,7 +276,7 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     buttons = [
     [
         InlineKeyboardButton(
-            "• ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ •",
+            "⎙• ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ •⎙",
             url=anime_link,
             style="success",
         )
