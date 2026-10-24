@@ -49,6 +49,8 @@ ANIME_CHANNEL_LINKS = {
     "The Ramparts Of Ice" : "https://t.me/+eGLMJuQ2lTA4YTBl",
     "JoJo’s Bizarre Adventure Season 6 – Steel Ball Run" : "https://t.me/+4iT4nt1SFNE2Yzdl",
     "The Apothecary Diaries" : "https://t.me/+Ab5t_ExrlXkyOTNl",
+    "A Wild Last Boss Appeared" : "https://t.me/+s6_zOzbnJ_UxMjk9",
+    "Black Clover" : "https://t.me/+WTEdJxxK8OU0ODBl",
     # Replace this example link with your real Demon Slayer channel link.
     "demon slayer": "https://t.me/DemonSlayerChannel",
 }
@@ -65,6 +67,8 @@ ANIME_POSTERS = {
     "The Ramparts Of Ice" : "https://imgyx.pages.dev/cckx3",
     "JoJo’s Bizarre Adventure Season 6 – Steel Ball Run" : "https://imgyx.pages.dev/NDUnT",
     "The Apothecary Diaries" : "https://imgyx.pages.dev/JaNj9",
+    "A Wild Last Boss Appeared" : "https://imgyx.pages.dev/HGBe4",
+    "Black Clover" : "https://imgyx.pages.dev/PQ8rI",
 }
 DEFAULT_POSTER_URL = ""
 
@@ -227,7 +231,7 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not original_text or not contains_episode(original_text):
         return
 
-    anime_name, episode_number = extract_episode_details(original_text)
+    anime_name, episode_number, season_number = extract_episode_details(original_text)
     anime_link = get_anime_channel_link(anime_name)
     poster_url = get_anime_poster_url(anime_name)
 
@@ -237,6 +241,7 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     "──────────────────\n"
     f"➤ Episode: {escape(episode_number)}\n"
     "➥ Quality: Multi Quality [Tamil Audio]\n"
+    "➥ Season : {escape(season_number)}\n"
     "──────────────────\n"
     f"<blockquote>➽ NEW EPISODE {escape(episode_number)} ADDED 👇</blockquote>" )
   
