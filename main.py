@@ -257,14 +257,14 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     poster_url = get_anime_poster_url(anime_name)
 
     announcement = (
-        f"<blockquote>➪ {escape(anime_name)}</blockquote>\n"
+        f"<blockquote><b>➪ {escape(anime_name)}</b></blockquote>\n"
     
     "──────────────────\n"
     f"<b>➥ Season : {escape(season_number)}\n"   
     f"➤ Episode: {escape(episode_number)}\n"
     "➥ Quality: Multi Quality [Tamil Audio]</b>\n"
     "──────────────────\n"
-    f"<blockquote>➽ NEW EPISODE {escape(episode_number)} ADDED 👇</blockquote>" )
+    f"<blockquote><b>➽ NEW EPISODE {escape(episode_number)} ADDED 👇</b></blockquote>" )
   
 
     # Telegram Bot API does not support custom inline-button background colors.
