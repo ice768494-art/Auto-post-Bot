@@ -260,9 +260,9 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"<blockquote>➪ {escape(anime_name)}</blockquote>\n"
     
     "──────────────────\n"
+    f"<b>➥ Season : {escape(season_number)}\n"   
     f"➤ Episode: {escape(episode_number)}\n"
-    "➥ Quality: Multi Quality [Tamil Audio]\n"
-    f"➥ Season : {escape(season_number)}\n"
+    "➥ Quality: Multi Quality [Tamil Audio]</b>\n"
     "──────────────────\n"
     f"<blockquote>➽ NEW EPISODE {escape(episode_number)} ADDED 👇</blockquote>" )
   
