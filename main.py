@@ -162,7 +162,6 @@ for line in lines:
         line,
         re.IGNORECASE,
     )
-
     if episode_match:
         episode_number = episode_match.group(1)
 
@@ -171,7 +170,6 @@ for line in lines:
         line,
         re.IGNORECASE,
     )
-
     if season_match:
         season_number = season_match.group(1)
 
@@ -179,9 +177,8 @@ for index, line in enumerate(lines):
     if re.search(r"\bEpisode\b", line, re.IGNORECASE):
         if index > 0:
             candidate = lines[index - 1]
-
             if not re.search(
-                r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b",
+                r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese|Season)\b",
                 candidate,
                 re.IGNORECASE,
             ):
@@ -192,14 +189,12 @@ if anime_name == "Unknown Anime":
     for line in lines:
         if re.search(r"\bEpisode\b", line, re.IGNORECASE):
             continue
-
         if re.search(
             r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b",
             line,
             re.IGNORECASE,
         ):
             continue
-
         if re.search(r"\bSeason\s*[:#-]?\s*\d+", line, re.IGNORECASE):
             continue
 
@@ -207,43 +202,6 @@ if anime_name == "Unknown Anime":
         break
 
 return anime_name, episode_number, season_number
-
-    for line in lines:
-        match = re.search(
-            r"\bEpisode\s*[:#-]?\s*(\d+(?:\.\d+)?)",
-            line,
-            re.IGNORECASE,
-        )
-        if match:
-            episode_number = match.group(1)
-            break
-
-    for index, line in enumerate(lines):
-        if re.search(r"\bEpisode\b", line, re.IGNORECASE):
-            if index > 0:
-                candidate = lines[index - 1]
-                if not re.search(
-                    r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b",
-                    candidate,
-                    re.IGNORECASE,
-                ):
-                    anime_name = candidate
-            break
-
-    if anime_name == "Unknown Anime":
-        for line in lines:
-            if re.search(r"\bEpisode\b", line, re.IGNORECASE):
-                continue
-            if re.search(
-                r"\b(480p|720p|1080p|2160p|Tamil|English|Japanese)\b",
-                line,
-                re.IGNORECASE,
-            ):
-                continue
-            anime_name = line
-            break
-
-    return anime_name, episode_number
 
 
 # ==================== COMMANDS ====================
