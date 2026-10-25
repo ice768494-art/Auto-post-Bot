@@ -52,6 +52,7 @@ ANIME_CHANNEL_LINKS = {
     "A Wild Last Boss Appeared" : "https://t.me/+s6_zOzbnJ_UxMjk9",
     "Black Clover" : "https://t.me/+WTEdJxxK8OU0ODBl",
     "Blue Box" : "https://t.me/+NNlAczU_448zZTI1",
+    "Overgeared" : "https://t.me/+mzi8whxY721mZmM1",
     "As A Reincarnated Aristocrat I'll Use My Appraisal Skill To Rise The World" : "https://t.me/+k2ETQ1m_J3lhZmQ1",
     "Even Though I'm a Super Timid Noble Girl, I Accepted the Bet From My Cunning Fiancé" : "https://t.me/+iperfm4Spv0wMzI9",
     # Replace this example link with your real Demon Slayer channel link.
@@ -73,6 +74,7 @@ ANIME_POSTERS = {
     "A Wild Last Boss Appeared" : "https://imgyx.pages.dev/HGBe4",
     "Black Clover" : "https://imgyx.pages.dev/PQ8rI",
     "Blue Box" : "https://imgyx.pages.dev/VnXBt",
+    "Overgeared" : "https://imgyx.pages.dev/eOHjc",
     "As A Reincarnated Aristocrat I'll Use My Appraisal Skill To Rise The World" : "https://imgyx.pages.dev/IBNyv",
     "Even Though I'm a Super Timid Noble Girl, I Accepted the Bet From My Cunning Fiancé" : "https://imgyx.pages.dev/KhSAr",
 }
