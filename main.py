@@ -14,6 +14,12 @@ from telegram.ext import (
     filters,
 )
 
+import html
+import sqlite3
+from contextlib import closing
+from urllib.parse import urlparse
+from telegram.constants import ParseMode
+
 # ==================== LOGGING ====================
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -38,6 +44,16 @@ if not MAIN_CHANNEL_ID:
     raise ValueError("MAIN_CHANNEL_ID is missing from environment variables!")
 if not SOURCE_CHANNEL_IDS:
     raise ValueError("SOURCE_CHANNEL_IDS is missing from environment variables!")
+
+# ANuploadvot configuration. These are optional if only Auto-post-Bot is used.
+SOURCE_CHANNEL_ID = os.getenv("SOURCE_CHANNEL_ID", "").strip()
+ADMIN_IDS = {
+    int(value.strip())
+    for value in os.getenv("ADMIN_IDS", "").split(",")
+    if value.strip().lstrip("-").isdigit()
+}
+DATABASE_PATH = os.getenv("DATABASE_PATH", "/var/data/anime_channels.sqlite3").strip()
+
 
 # ==================== ANIME CHANNEL LINKS ====================
 ANIME_CHANNEL_LINKS = {
@@ -225,6 +241,521 @@ def extract_episode_details(text):
     return anime_name, episode_number, season_number
 
 
+def connect_db():
+    # Ensure the database directory exists and is writable.
+    folder = os.path.dirname(os.path.abspath(DATABASE_PATH))
+    os.makedirs(folder, exist_ok=True)
+
+    conn = sqlite3.connect(DATABASE_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    with closing(connect_db()) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS anime_routes (
+                anime_key TEXT PRIMARY KEY,
+                anime_name TEXT NOT NULL,
+                channel_id INTEGER NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+
+def normalize_name(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip()).casefold()
+
+def get_setting(key):
+    with closing(connect_db()) as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key = ?",
+            (key,),
+        ).fetchone()
+        return row["value"] if row else None
+
+def set_setting(key, value):
+    with closing(connect_db()) as conn:
+        conn.execute(
+            "INSERT INTO settings(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, str(value)),
+        )
+        conn.commit()
+
+def get_route(anime_name):
+    with closing(connect_db()) as conn:
+        return conn.execute(
+            "SELECT anime_name, channel_id FROM anime_routes WHERE anime_key = ?",
+            (normalize_name(anime_name),),
+        ).fetchone()
+
+def parse_channel_id(value):
+    value = value.strip()
+    if not re.fullmatch(r"-?\d+", value):
+        raise ValueError(
+            "Channel must be a numeric Telegram channel ID, e.g. -1001234567890."
+        )
+    return int(value)
+
+def parse_post(text):
+    """Parse anime name, season, episode, poster URL, and quality links."""
+
+    if not text:
+        return None
+
+    raw_lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
+    ]
+
+    if len(raw_lines) < 2:
+        return None
+
+    image_re = re.compile(
+        r"^\s*(?:image(?:\s*url)?|poster|thumbnail|photo)\s*[:=\-]?\s*"
+        r"(https?://\S+)\s*$",
+        re.IGNORECASE,
+    )
+
+    image_url = None
+    lines = []
+
+    for line in raw_lines:
+        image_match = image_re.match(line)
+
+        if image_match:
+            candidate = image_match.group(1).rstrip(".,;)")
+            parsed_image = urlparse(candidate)
+
+            if parsed_image.scheme in ("http", "https") and parsed_image.netloc:
+                image_url = candidate
+
+            continue
+
+        lines.append(line)
+
+    if len(lines) < 2:
+        return None
+
+    # Detect season number.
+    season_re = re.compile(
+        r"\b(?:season|s)\s*[-:#]?\s*(\d+)\b",
+        re.IGNORECASE,
+    )
+
+    season_number = "1"
+
+    for line in lines:
+        season_match = season_re.search(line)
+
+        if season_match:
+            season_number = season_match.group(1)
+            break
+
+    # Detect episode number.
+    episode_re = re.compile(
+        r"\b(?:(?:season|s)\s*\d+\s*[-:]?\s*)?"
+        r"(?:episode|ep|e)\s*[-:#]?\s*(\d+(?:\.\d+)?)\b",
+        re.IGNORECASE,
+    )
+
+    episode_index = None
+    episode_number = None
+
+    for index, line in enumerate(lines):
+        match = episode_re.search(line)
+
+        if match:
+            episode_index = index
+            episode_number = match.group(1)
+            break
+
+    if episode_index is None:
+        return None
+
+    # Extract anime name and format it using title().
+    anime_name = " ".join(
+        lines[:episode_index]
+    ).strip(" \t-–—:|")
+
+    # Remove season information from the anime name if it appears there.
+    anime_name = season_re.sub("", anime_name).strip(" \t-–—:|")
+
+    if not anime_name:
+        return None
+
+    anime_name = anime_name.title()
+
+    # Detect quality links.
+    qualities = {}
+
+    quality_re = re.compile(
+        r"\b(144|240|360|480|540|576|720|1080|1440|2160)\s*[pP]\b"
+        r"\s*[-:–—]?\s*(https?://[^\s|<>]+)",
+        re.IGNORECASE,
+    )
+
+    for line in lines[episode_index + 1:]:
+        for match in quality_re.finditer(line):
+            quality = f"{match.group(1)}P"
+            url = match.group(2).rstrip(".,;)")
+
+            parsed_url = urlparse(url)
+
+            if parsed_url.scheme in ("http", "https") and parsed_url.netloc:
+                qualities[quality] = url
+
+    # Also accept quality links on the episode-heading line.
+    if not qualities:
+        for line in lines[episode_index:]:
+            for match in quality_re.finditer(line):
+                quality = f"{match.group(1)}P"
+                url = match.group(2).rstrip(".,;)")
+
+                parsed_url = urlparse(url)
+
+                if parsed_url.scheme in ("http", "https") and parsed_url.netloc:
+                    qualities[quality] = url
+
+    if not qualities:
+        return None
+
+    return {
+        "anime_name": anime_name,
+        "season_number": season_number,
+        "episode_number": episode_number,
+        "qualities": qualities,
+        "image_url": image_url,
+    }
+
+def make_caption(anime_name, season_number, episode_number):
+    safe_name = html.escape(anime_name.title())
+    safe_season = html.escape(str(season_number).zfill(2))
+    safe_episode = html.escape(str(episode_number))
+
+    return (
+        f"{safe_name} | தமிழ் Official Dub\n\n"
+        f"Season : {safe_season} | Episode : {safe_episode}\n\n"
+        "‼️ Note - Click The Below Button to Get Episodes 👇"
+    )
+
+def make_keyboard(qualities):
+    # Buttons are arranged two per row.
+    preferred = [
+        "480P", "720P", "1080P", "360P", "240P",
+        "144P", "540P", "576P", "1440P", "2160P",
+    ]
+    ordered = [quality for quality in preferred if quality in qualities]
+    ordered.extend(quality for quality in qualities if quality not in ordered)
+
+    buttons = [
+        InlineKeyboardButton(f"📥 {quality}", url=qualities[quality])
+        for quality in ordered
+    ]
+    rows = [
+        buttons[index:index + 2]
+        for index in range(0, len(buttons), 2)
+    ]
+    return InlineKeyboardMarkup(rows)
+
+async def is_admin(update: Update) -> bool:
+    user = update.effective_user
+    message = update.effective_message
+
+    if not user or not message:
+        return False
+
+    if not ADMIN_IDS:
+        await message.reply_text(
+            "⚠️ ADMIN_IDS is not configured. Add your Telegram numeric user ID "
+            "in Render environment variables."
+        )
+        return False
+
+    if user.id not in ADMIN_IDS:
+        await message.reply_text(
+            "⛔ This command is restricted to the bot admin."
+        )
+        return False
+
+    return True
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.effective_message.reply_text(
+        "🔥 Anime Auto Publisher is running!\n\n"
+        "Commands:\n"
+        "/addanime Anime Name -1001234567890\n"
+        "/removeanime Anime Name\n"
+        "/listanime\n"
+        "/setdefault -1001234567890\n"
+        "/defaultchannel\n"
+        "/help"
+    )
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await start(update, context)
+
+async def addanime(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update):
+        return
+
+    args = context.args
+    if len(args) < 2:
+        await update.effective_message.reply_text(
+            "Usage:\n/addanime Anime Name -1001234567890\n\n"
+            "Put the channel ID last. The bot must be an administrator in that channel."
+        )
+        return
+
+    try:
+        channel_id = parse_channel_id(args[-1])
+    except ValueError as exc:
+        await update.effective_message.reply_text(str(exc))
+        return
+
+    anime_name = " ".join(args[:-1]).strip()
+    if not anime_name:
+        await update.effective_message.reply_text("Please provide an anime name.")
+        return
+
+    try:
+        chat = await context.bot.get_chat(channel_id)
+
+        with closing(connect_db()) as conn:
+            conn.execute(
+                "INSERT INTO anime_routes(anime_key, anime_name, channel_id) "
+                "VALUES(?, ?, ?) "
+                "ON CONFLICT(anime_key) DO UPDATE SET "
+                "anime_name=excluded.anime_name, "
+                "channel_id=excluded.channel_id",
+                (normalize_name(anime_name), anime_name, channel_id),
+            )
+            conn.commit()
+
+        await update.effective_message.reply_text(
+            f"✅ Registered: {anime_name}\n"
+            f"📢 Destination: {chat.title or channel_id}\n"
+            f"🆔 ID: {channel_id}"
+        )
+    except Exception as exc:
+        logger.exception("Failed to register route")
+        await update.effective_message.reply_text(
+            "❌ Couldn't access that channel. Make sure the bot is an administrator "
+            "there and that the numeric channel ID is correct.\n"
+            f"Details: {exc}"
+        )
+
+async def removeanime(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update):
+        return
+
+    anime_name = " ".join(context.args).strip()
+    if not anime_name:
+        await update.effective_message.reply_text(
+            "Usage: /removeanime Anime Name"
+        )
+        return
+
+    with closing(connect_db()) as conn:
+        cursor = conn.execute(
+            "DELETE FROM anime_routes WHERE anime_key = ?",
+            (normalize_name(anime_name),),
+        )
+        conn.commit()
+
+    if cursor.rowcount:
+        await update.effective_message.reply_text(
+            f"🗑️ Removed route for: {anime_name}"
+        )
+    else:
+        await update.effective_message.reply_text(
+            f"ℹ️ No route found for: {anime_name}"
+        )
+
+async def listanime(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update):
+        return
+
+    with closing(connect_db()) as conn:
+        rows = conn.execute(
+            "SELECT anime_name, channel_id FROM anime_routes "
+            "ORDER BY anime_name COLLATE NOCASE"
+        ).fetchall()
+
+    if not rows:
+        await update.effective_message.reply_text(
+            "No anime routes registered yet."
+        )
+        return
+
+    lines = ["📚 Registered anime channels:"]
+    for row in rows:
+        lines.append(f"• {row['anime_name']} — `{row['channel_id']}`")
+
+    await update.effective_message.reply_text(
+        "\n".join(lines),
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+async def setdefault(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update):
+        return
+
+    if len(context.args) != 1:
+        await update.effective_message.reply_text(
+            "Usage: /setdefault -1001234567890"
+        )
+        return
+
+    try:
+        channel_id = parse_channel_id(context.args[0])
+        chat = await context.bot.get_chat(channel_id)
+        set_setting("default_channel_id", channel_id)
+
+        await update.effective_message.reply_text(
+            f"✅ Default channel set to {chat.title or channel_id}\n"
+            f"🆔 {channel_id}"
+        )
+    except Exception as exc:
+        logger.exception("Failed to set default channel")
+        await update.effective_message.reply_text(
+            "❌ Couldn't access that channel. Add the bot as an administrator "
+            "and check the ID.\n"
+            f"Details: {exc}"
+        )
+
+async def defaultchannel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update):
+        return
+
+    channel_id = get_setting("default_channel_id")
+    if not channel_id:
+        await update.effective_message.reply_text(
+            "No default channel configured. Use /setdefault -1001234567890"
+        )
+        return
+
+    try:
+        chat = await context.bot.get_chat(int(channel_id))
+        title = chat.title or str(channel_id)
+    except Exception:
+        title = "Unable to fetch channel title"
+
+    await update.effective_message.reply_text(
+        f"📢 Default channel: {title}\n🆔 {channel_id}"
+    )
+
+async def process_source_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    if not message:
+        return
+
+    post_text = message.text or message.caption or ""
+    if not post_text:
+        return
+
+    if not SOURCE_CHANNEL_ID:
+        logger.error("SOURCE_CHANNEL_ID is not configured")
+        return
+
+    try:
+        expected_source_id = int(SOURCE_CHANNEL_ID)
+    except ValueError:
+        logger.error("SOURCE_CHANNEL_ID must be a numeric channel ID")
+        return
+
+    if (
+        not update.effective_chat
+        or update.effective_chat.id != expected_source_id
+    ):
+        return
+
+    parsed = parse_post(post_text)
+    if not parsed:
+        logger.info(
+            "Ignored source post: did not match anime/episode/quality-link format"
+        )
+        return
+
+    anime_name = parsed["anime_name"]
+    route = get_route(anime_name)
+
+    if route:
+        destination_id = int(route["channel_id"])
+        destination_name = route["anime_name"]
+    else:
+        default_id = get_setting("default_channel_id")
+        if not default_id:
+            logger.warning(
+                "No route for %s and no default channel configured",
+                anime_name,
+            )
+            return
+        destination_id = int(default_id)
+        destination_name = "default channel"
+
+    caption = make_caption(
+    anime_name,
+    parsed["season_number"],
+    parsed["episode_number"],)
+
+    keyboard = make_keyboard(parsed["qualities"])
+    image_url = parsed.get("image_url")
+
+    try:
+        if image_url:
+            try:
+                await context.bot.send_photo(
+                    chat_id=destination_id,
+                    photo=image_url,
+                    caption=caption,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=keyboard,
+                )
+            except Exception:
+                # If Telegram cannot load the supplied image URL, still publish the links.
+                logger.exception(
+                    "Photo publication failed; falling back to a text post"
+                )
+                await context.bot.send_message(
+                    chat_id=destination_id,
+                    text=caption,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=keyboard,
+                    disable_web_page_preview=True,
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=destination_id,
+                text=caption,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+                disable_web_page_preview=True,
+            )
+
+        logger.info(
+            "Published %s Episode %s to %s (photo=%s)",
+            anime_name,
+            parsed["episode_number"],
+            destination_name,
+            bool(image_url),
+        )
+    except Exception:
+        logger.exception(
+            "Failed to publish %s to channel %s",
+            anime_name,
+            destination_id,
+        )
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.error("Telegram handler error: %s", context.error)
+
 # ==================== COMMANDS ====================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_message:
@@ -233,7 +764,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "I detect channel posts containing the word Episode.\n"
             "Matching posts are announced in your main channel.\n\n"
             "Each anime can have its own channel link and poster.\n\n"
-            "Use /status to check the bot."
+            "Use /status to check the bot.\n\n"
+            "Upload routing: /addanime, /removeanime, /listanime, /setdefault, /defaultchannel, /help"
         )
 
 
@@ -352,18 +884,44 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
 
-# ==================== MAIN ====================
+
+# ==================== COMBINED MAIN ====================
 def main():
+    # Initialize ANuploadvot's SQLite routing database.
+    init_db()
+
     Thread(target=start_web_server, daemon=True).start()
 
     application = Application.builder().token(BOT_TOKEN).build()
+
+    # Shared commands
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("status", status_command))
+
+    # ANuploadvot route-management commands
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("addanime", addanime))
+    application.add_handler(CommandHandler("removeanime", removeanime))
+    application.add_handler(CommandHandler("listanime", listanime))
+    application.add_handler(CommandHandler("setdefault", setdefault))
+    application.add_handler(CommandHandler("defaultchannel", defaultchannel))
+
+    # Auto-post announcements from every channel in SOURCE_CHANNEL_IDS.
+    channel_text_or_caption = filters.ChatType.CHANNEL & (filters.TEXT | filters.CAPTION)
     application.add_handler(
-        MessageHandler(filters.UpdateType.CHANNEL_POST, handle_channel_post)
+        MessageHandler(channel_text_or_caption, handle_channel_post)
     )
 
-    logger.info("Anime Auto Post Bot starting...")
+    # Upload/quality-link publisher from SOURCE_CHANNEL_ID.
+    # This handler supports text posts and captions on photo/video/document posts.
+    application.add_handler(
+        MessageHandler(channel_text_or_caption, process_source_post),
+        group=1,
+    )
+
+    application.add_error_handler(error_handler)
+
+    logger.info("Starting combined Auto-post-Bot + ANuploadvot")
     application.run_polling(
         allowed_updates=["message", "channel_post"],
         drop_pending_updates=False,
