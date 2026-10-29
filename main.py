@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from html import escape
@@ -27,6 +28,9 @@ logging.basicConfig(
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+STARTED_AT = time.time()
+METRICS = {"episode_posts_ok": 0, "episode_posts_failed": 0,
+           "upload_posts_ok": 0, "upload_posts_failed": 0}
 
 # ==================== CONFIGURATION ====================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
@@ -174,7 +178,20 @@ def get_anime_channel_link(anime_name):
 
 
 def get_anime_poster_url(anime_name):
-    return get_matching_value(ANIME_POSTERS, anime_name) or DEFAULT_POSTER_URL or None
+    """Database poster overrides take precedence over built-in defaults."""
+    try:
+        with closing(connect_db()) as conn:
+            rows = conn.execute(
+                "SELECT anime_name, poster_url FROM anime_posters ORDER BY length(anime_name) DESC"
+            ).fetchall()
+        normalized = normalize_name(anime_name)
+        for row in rows:
+            key = normalize_name(row["anime_name"])
+            if key and (key in normalized or normalized in key):
+                return row["poster_url"]
+    except Exception:
+        logger.exception("Could not read poster configuration from database")
+    return get_matching_value(ANIME_POSTERS, anime_name) or get_setting("default_poster_url") or DEFAULT_POSTER_URL or None
 
 
 def extract_episode_details(text):
@@ -263,6 +280,13 @@ def init_db():
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS anime_posters (
+                anime_key TEXT PRIMARY KEY,
+                anime_name TEXT NOT NULL,
+                poster_url TEXT NOT NULL
             )
         """)
         conn.commit()
@@ -495,6 +519,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/listanime\n"
         "/setdefault -1001234567890\n"
         "/defaultchannel\n"
+        "/setposter Anime Name https://image-url\n"
+        "/removeposter Anime Name\n"
+        "/listposters\n"
+        "/setdefaultposter https://image-url (or off)\n"
         "/help"
     )
 
@@ -651,6 +679,112 @@ async def defaultchannel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📢 Default channel: {title}\n🆔 {channel_id}"
     )
 
+def validate_http_url(value: str) -> str:
+    value = value.strip()
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValueError("Please provide a valid http:// or https:// URL.")
+    return value
+
+async def setposter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command: /setposter Anime Name https://direct-image-url"""
+    if not await is_admin(update):
+        return
+    args = context.args
+    if len(args) < 2:
+        await update.effective_message.reply_text(
+            "Usage: /setposter Anime Name https://example.com/poster.jpg\n"
+            "Use a direct image URL that Telegram can fetch."
+        )
+        return
+    try:
+        poster_url = validate_http_url(args[-1])
+    except ValueError as exc:
+        await update.effective_message.reply_text(str(exc))
+        return
+    anime_name = " ".join(args[:-1]).strip()
+    if not anime_name:
+        await update.effective_message.reply_text("Please provide an anime name.")
+        return
+    try:
+        with closing(connect_db()) as conn:
+            conn.execute(
+                "INSERT INTO anime_posters(anime_key, anime_name, poster_url) VALUES(?, ?, ?) "
+                "ON CONFLICT(anime_key) DO UPDATE SET anime_name=excluded.anime_name, poster_url=excluded.poster_url",
+                (normalize_name(anime_name), anime_name, poster_url),
+            )
+            conn.commit()
+        logger.info("Admin %s updated poster URL for %s", update.effective_user.id, anime_name)
+        await update.effective_message.reply_text(
+            f"✅ Poster saved for {anime_name}.\nURL: {poster_url}\n"
+            "The custom poster takes priority over the built-in poster."
+        )
+    except Exception:
+        logger.exception("Failed to save poster for %s", anime_name)
+        await update.effective_message.reply_text("❌ Could not save the poster. Check the database and Render logs.")
+
+async def removeposter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update):
+        return
+    anime_name = " ".join(context.args).strip()
+    if not anime_name:
+        await update.effective_message.reply_text("Usage: /removeposter Anime Name")
+        return
+    try:
+        with closing(connect_db()) as conn:
+            cursor = conn.execute("DELETE FROM anime_posters WHERE anime_key = ?", (normalize_name(anime_name),))
+            conn.commit()
+        if cursor.rowcount:
+            await update.effective_message.reply_text(f"🗑️ Removed custom poster for {anime_name}. Built-in poster will be used if available.")
+            logger.info("Admin %s removed poster override for %s", update.effective_user.id, anime_name)
+        else:
+            await update.effective_message.reply_text(f"ℹ️ No custom poster saved for {anime_name}.")
+    except Exception:
+        logger.exception("Failed to remove poster for %s", anime_name)
+        await update.effective_message.reply_text("❌ Could not remove the poster. Check the Render logs.")
+
+async def listposters(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update):
+        return
+    try:
+        with closing(connect_db()) as conn:
+            rows = conn.execute("SELECT anime_name, poster_url FROM anime_posters ORDER BY anime_name COLLATE NOCASE").fetchall()
+        if not rows:
+            await update.effective_message.reply_text("No custom posters saved yet. Use /setposter Anime Name https://image-url")
+            return
+        lines = ["🖼️ Custom anime posters:"]
+        for row in rows:
+            lines.append(f"• {row['anime_name']}\n{row['poster_url']}")
+        message = "\n\n".join(lines)
+        # Keep each Telegram message under its maximum size.
+        for offset in range(0, len(message), 3500):
+            await update.effective_message.reply_text(message[offset:offset + 3500], disable_web_page_preview=True)
+    except Exception:
+        logger.exception("Failed to list custom posters")
+        await update.effective_message.reply_text("❌ Could not read poster settings. Check the Render logs.")
+
+async def setdefaultposter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update):
+        return
+    if len(context.args) != 1:
+        await update.effective_message.reply_text("Usage: /setdefaultposter https://example.com/poster.jpg\nUse /setdefaultposter off to disable the default poster.")
+        return
+    value = context.args[0].strip()
+    if value.casefold() == "off":
+        set_setting("default_poster_url", "")
+        await update.effective_message.reply_text("✅ Default poster disabled.")
+        return
+    try:
+        value = validate_http_url(value)
+        set_setting("default_poster_url", value)
+        await update.effective_message.reply_text("✅ Default poster URL saved.")
+        logger.info("Admin %s updated default poster URL", update.effective_user.id)
+    except ValueError as exc:
+        await update.effective_message.reply_text(str(exc))
+    except Exception:
+        logger.exception("Failed to set default poster")
+        await update.effective_message.reply_text("❌ Could not save the default poster. Check the Render logs.")
+
 async def process_source_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     if not message:
@@ -739,6 +873,7 @@ async def process_source_post(update: Update, context: ContextTypes.DEFAULT_TYPE
                 disable_web_page_preview=True,
             )
 
+        METRICS["upload_posts_ok"] += 1
         logger.info(
             "Published %s Episode %s to %s (photo=%s)",
             anime_name,
@@ -747,6 +882,7 @@ async def process_source_post(update: Update, context: ContextTypes.DEFAULT_TYPE
             bool(image_url),
         )
     except Exception:
+        METRICS["upload_posts_failed"] += 1
         logger.exception(
             "Failed to publish %s to channel %s",
             anime_name,
@@ -754,7 +890,15 @@ async def process_source_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logger.error("Telegram handler error: %s", context.error)
+    error = context.error
+    if error:
+        logger.error(
+            "Unhandled Telegram update error (update=%r)",
+            update,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+    else:
+        logger.error("Telegram handler reported an unknown error (update=%r)", update)
 
 # ==================== COMMANDS ====================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -765,18 +909,46 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Matching posts are announced in your main channel.\n\n"
             "Each anime can have its own channel link and poster.\n\n"
             "Use /status to check the bot.\n\n"
-            "Upload routing: /addanime, /removeanime, /listanime, /setdefault, /defaultchannel, /help"
+            "Upload routing: /addanime, /removeanime, /listanime, /setdefault, /defaultchannel\n"
+            "Poster tools (admin): /setposter, /removeposter, /listposters, /setdefaultposter"
         )
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_message:
-        await update.effective_message.reply_text(
-            "✅ Anime Auto Post Bot is running.\n\n"
-            f"📢 Configured source channels: {len(SOURCE_CHANNEL_IDS)}\n"
-            "🔍 Keyword: Episode\n"
-            "🗄️ Database: Not required"
-        )
+    if not update.effective_message:
+        return
+    try:
+        with closing(connect_db()) as conn:
+            conn.execute("SELECT 1").fetchone()
+            route_count = conn.execute("SELECT COUNT(*) FROM anime_routes").fetchone()[0]
+            poster_count = conn.execute("SELECT COUNT(*) FROM anime_posters").fetchone()[0]
+        db_state = "✅ Connected"
+    except Exception as exc:
+        logger.exception("Status check: database unavailable")
+        route_count = poster_count = 0
+        db_state = f"❌ Unavailable ({type(exc).__name__})"
+    uptime_seconds = max(0, int(time.time() - STARTED_AT))
+    hours, remainder = divmod(uptime_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    is_admin_user = bool(update.effective_user and update.effective_user.id in ADMIN_IDS)
+    lines = [
+        "🤖 Combined Anime Bot Status",
+        "🟢 Process: Running",
+        f"⏱️ Uptime: {hours}h {minutes}m {seconds}s",
+        f"📢 Auto-post source channels: {len(SOURCE_CHANNEL_IDS)}",
+        f"🎬 Upload source configured: {'Yes' if SOURCE_CHANNEL_ID else 'No'}",
+        f"🗄️ SQLite: {db_state}",
+        f"🧭 Anime routes: {route_count}",
+        f"🖼️ Custom posters: {poster_count}",
+        f"📤 Episode announcements sent: {METRICS['episode_posts_ok']}",
+        f"⚠️ Episode announcement failures: {METRICS['episode_posts_failed']}",
+        f"📤 Upload posts sent: {METRICS['upload_posts_ok']}",
+        f"⚠️ Upload post failures: {METRICS['upload_posts_failed']}",
+    ]
+    if is_admin_user:
+        lines.append(f"🧾 Database path: {DATABASE_PATH}")
+        lines.append(f"👮 Admin IDs configured: {len(ADMIN_IDS)}")
+    await update.effective_message.reply_text("\n".join(lines))
 
 
 # ==================== EPISODE DETECTION ====================
@@ -872,12 +1044,14 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
                 disable_web_page_preview=True,
             )
 
+        METRICS["episode_posts_ok"] += 1
         logger.info(
             "Episode %s announcement sent for %s",
             episode_number,
             anime_name,
         )
     except Exception:
+        METRICS["episode_posts_failed"] += 1
         logger.exception(
             "Failed to publish episode announcement to MAIN_CHANNEL_ID=%s",
             MAIN_CHANNEL_ID,
@@ -905,6 +1079,10 @@ def main():
     application.add_handler(CommandHandler("listanime", listanime))
     application.add_handler(CommandHandler("setdefault", setdefault))
     application.add_handler(CommandHandler("defaultchannel", defaultchannel))
+    application.add_handler(CommandHandler("setposter", setposter))
+    application.add_handler(CommandHandler("removeposter", removeposter))
+    application.add_handler(CommandHandler("listposters", listposters))
+    application.add_handler(CommandHandler("setdefaultposter", setdefaultposter))
 
     # Auto-post announcements from every channel in SOURCE_CHANNEL_IDS.
     channel_text_or_caption = filters.ChatType.CHANNEL & (filters.TEXT | filters.CAPTION)
