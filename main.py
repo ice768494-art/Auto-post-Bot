@@ -75,6 +75,7 @@ ANIME_CHANNEL_LINKS = {
     "Psyren" : "https://t.me/+qb7j7gch9rg5NjM1",
     "Overgeared" : "https://t.me/+mzi8whxY721mZmM1",
     "Sword Art Online" : "https://t.me/+4WesuhOsbsUwNmM1",
+    "Firefly Wedding" : "https://t.me/+Rse64X9j-idlYjRl",
     "As A Reincarnated Aristocrat I'll Use My Appraisal Skill To Rise The World" : "https://t.me/+k2ETQ1m_J3lhZmQ1",
     "Even Though I'm a Super Timid Noble Girl, I Accepted the Bet From My Cunning Fiancé" : "https://t.me/+iperfm4Spv0wMzI9",
     # Replace this example link with your real Demon Slayer channel link.
