@@ -69,7 +69,7 @@ ANIME_CHANNEL_LINKS = {
     "The Ramparts Of Ice" : "https://t.me/+eGLMJuQ2lTA4YTBl",
     "JoJo’s Bizarre Adventure Steel Ball Run" : "https://t.me/+4iT4nt1SFNE2Yzdl",
     "The Apothecary Diaries" : "https://t.me/+Ab5t_ExrlXkyOTNl",
-    "A Wild Last Boss Appeared" : "https://t.me/+s6_zOzbnJ_UxMjk9",
+    "A Wild Last Boss Appeared" : "https://t.me/+Hdz90USLCW4yZjE1",
     "Black Clover" : "https://t.me/+WTEdJxxK8OU0ODBl",
     "Blue Box" : "https://t.me/+NNlAczU_448zZTI1",
     "Psyren" : "https://t.me/+qb7j7gch9rg5NjM1",
