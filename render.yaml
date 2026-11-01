@@ -2,41 +2,32 @@ services:
   - type: web
     name: anime-auto-post-bot
     runtime: python
-
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
-
     healthCheckPath: /health
-
     envVars:
       - key: BOT_TOKEN
         sync: false
-
       - key: MONGODB_URI
         sync: false
-
       - key: MONGODB_DATABASE
         value: anime_auto_post_bot
-
       - key: MAIN_CHANNEL_ID
         sync: false
-
       - key: SOURCE_CHANNEL_IDS
         sync: false
-
       - key: SOURCE_CHANNEL_ID
         sync: false
-
       - key: ADMIN_IDS
         sync: false
-
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: DASHBOARD_SECRET
+        generateValue: true
+      - key: PUBLIC_BASE_URL
+        sync: false
       - key: MIGRATE_SQLITE
         value: "true"
-
       - key: PORT
         value: "10000"
-
-      - key: PYTHON_VERSION
-        value: "3.12.8"
-
     autoDeploy: true

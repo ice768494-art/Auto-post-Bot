@@ -1,65 +1,102 @@
-# Combined Auto-post-Bot + ANuploadvot
+# Anime Auto Post Bot V2
 
-This project combines the supplied `Auto-post-Bot` and `ANuploadvot` source files into one Python Telegram bot process using one `BOT_TOKEN`.
-
-## Features
-
-- Watches the comma-separated `SOURCE_CHANNEL_IDS` and posts formatted anime episode announcements to `MAIN_CHANNEL_ID`, using the configured anime links/poster URLs from the original Auto-post-Bot.
-- Includes ANuploadvot's route-management commands and quality-link publisher.
-- Stores anime destination routes, default destination, custom poster URLs, and the default poster in SQLite.
-- Admins can manage posters directly in Telegram with `/setposter`, `/removeposter`, `/listposters`, and `/setdefaultposter`.
-- `/status` reports uptime, database connectivity, route/poster counts, configured source channels, and process-lifetime publish success/failure counters.
-- Logs detailed exceptions to Render logs while showing safer, shorter error messages to users.
-- Runs one HTTP health server for Render and one Telegram polling loop.
-
-**Note:** The supplied ANuploadvot source code implements upload/quality-link routing, but does not contain a voting feature. Voting cannot be preserved/added without its intended requirements or source code.
+## Included
+- Existing Telegram episode-announcement forwarding and upload-channel routing
+- MongoDB storage and optional SQLite import
+- Duplicate episode protection with stale-pending recovery
+- Generated 1280x720 episode posters stored in MongoDB
+- Public direct poster URL: `https://YOUR-SERVICE.onrender.com/poster/ASSET_ID.jpg`
+- Password-protected web admin dashboard
+- Route, anime-link and poster URL management from dashboard
+- JSON MongoDB backup and merge-restore
+- Episode history, statistics and customizable upload captions
 
 ## Render environment variables
 
-Required for Auto-post-Bot:
-- `BOT_TOKEN`: token from BotFather.
-- `MAIN_CHANNEL_ID`: numeric ID of the channel where Auto-post announcements go.
-- `SOURCE_CHANNEL_IDS`: comma-separated numeric channel IDs or usernames that Auto-post-Bot should monitor, e.g. `-1001111111111,-1002222222222`.
+Required:
+- `BOT_TOKEN`: Telegram bot token
+- `MONGODB_URI`: MongoDB Atlas connection string
+- `MAIN_CHANNEL_ID`: destination channel ID for announcements
+- `SOURCE_CHANNEL_IDS`: comma-separated channel IDs/usernames to monitor for announcement posts
+- `ADMIN_IDS`: comma-separated numeric Telegram user IDs
 
-For ANuploadvot upload routing:
-- `SOURCE_CHANNEL_ID`: numeric ID of the one source channel whose posts should be parsed for anime name, episode, and quality links. It can be the same as one of `SOURCE_CHANNEL_IDS`.
-- `ADMIN_IDS`: comma-separated numeric Telegram user IDs allowed to use route-management and poster-management commands.
-- `DATABASE_PATH`: set to `/var/data/anime_channels.sqlite3`. `render.yaml` sets this automatically and mounts a persistent disk at `/var/data`.
+Upload routing:
+- `SOURCE_CHANNEL_ID`: numeric ID of the upload source channel
+- `MONGODB_DATABASE`: defaults to `anime_auto_post_bot`
+- `MIGRATE_SQLITE`: defaults to true
 
-`PORT` is supplied by Render; the code defaults to `10000` for local testing.
+Dashboard:
+- `DASHBOARD_PASSWORD`: create a strong unique password
+- `DASHBOARD_SECRET`: Render generates this automatically
+- `PUBLIC_BASE_URL`: your Render service URL, e.g. `https://anime-auto-post-bot.onrender.com`
 
-## How to use upload routing
+## Telegram bot permissions
+1. Add the bot as an administrator to each source channel it must read.
+2. Add it as an administrator to destination channels where it posts.
+3. Give it permission to post messages and photos.
+4. Set `ADMIN_IDS` to your own Telegram numeric user ID.
 
-1. Add the bot as an administrator in the source and destination channels.
-2. Set your numeric Telegram user ID in `ADMIN_IDS`.
-3. In private chat with the bot, use:
-   - `/addanime Black Clover -1001234567890`
-   - `/listanime`
-   - `/removeanime Black Clover`
-   - `/setdefault -1001234567890`
-   - `/defaultchannel`
-   - `/setposter Black Clover https://example.com/black-clover.jpg`
-   - `/removeposter Black Clover`
-   - `/listposters`
-   - `/setdefaultposter https://example.com/default.jpg` (or `/setdefaultposter off`)
-4. A text or media-caption source post can use a format like:
+## Commands
 
-   Black Clover
-   Episode 01
-   480p - https://example.com/480p
-   720p - https://example.com/720p
+General:
+- `/start`, `/help`, `/status`
 
-5. The bot publishes the episode caption with quality-link buttons to the anime's registered destination channel, or to the configured default destination.
-6. Custom posters saved with `/setposter` take priority over built-in poster URLs. `/removeposter` removes only the custom override, so a built-in poster can be used again. The default poster is used only when no matching built-in or custom anime poster is found.
+Routes:
+- `/addanime Anime Name -1001234567890`
+- `/removeanime Anime Name`
+- `/listanime`
+- `/setdefault -1001234567890`
+- `/defaultchannel`
 
-## Deployment
+Anime links:
+- `/setanimelink Anime Name https://t.me/channel`
+- `/removeanimelink Anime Name`
+- `/listanimelinks`
+- `/getanimelink Anime Name`
+- `/setdefaultlink https://t.me/channel`
+- `/defaultlink`
 
-1. Upload these files to a new GitHub repository (or replace the files in a copy of one repository).
-2. Create a Render Web Service from that repository.
-3. Set the environment variables above.
-4. Ensure the persistent disk is mounted at `/var/data` and set `DATABASE_PATH=/var/data/anime_channels.sqlite3`. Render persistent disks require a compatible paid service plan; the `plan: free` setting in a blueprint cannot use a persistent disk. If you stay on Free for temporary testing, set `DATABASE_PATH=/tmp/anime_channels.sqlite3`, but poster/routes/settings will not survive restarts or redeployments.
-5. Deploy with `pip install -r requirements.txt` and start command `python main.py`.
+Posters:
+- `/setposter Anime Name https://image-url`
+- `/removeposter Anime Name`
+- `/listposters`
+- `/setdefaultposter https://image-url`
+- `/setdefaultposter off`
 
-`/status` publish counters are in-memory counters and reset when the bot restarts. Detailed exceptions are available in Render's service logs.
+Tools:
+- `/stats`
+- `/searchanime Anime Name`
+- `/animeinfo Anime Name`
+- `/history [Anime Name]`
+- `/clearhistory Anime Name`
+- `/setcaption <b>{anime}</b> Season {season} Episode {episode}`
+- `/defaultcaption`
+- `/backup`
+- Reply to a bot backup JSON document with `/restore`
+- `/dashboard`
 
-Do not commit real tokens or database credentials.
+## Upload source post format
+
+Example:
+```text
+The Ramparts Of Ice
+Season 02
+Episode 05
+480P - https://example.com/file480
+720P - https://example.com/file720
+1080P - https://example.com/file1080
+Image: https://example.com/poster.jpg
+```
+
+The image line is optional. If omitted, the bot tries the saved/built-in anime poster as the generated poster background, then creates a graphic poster if no image is available.
+
+## Important notes
+- A generated direct poster URL is public. Do not put private information in poster text.
+- Generated poster image bytes are stored in MongoDB. Keep MongoDB storage limits and costs in mind.
+- If `PUBLIC_BASE_URL` is blank, posters are still generated and posted to Telegram, but no direct URL button can be created. Set it to your Render service URL.
+- The dashboard password is separate from Telegram `ADMIN_IDS`.
+- Restore is a merge operation: it does not delete records absent from the backup.
+- SQLite migration only works if the old SQLite file actually exists at `DATABASE_PATH` in the deployed environment. MongoDB does not recover a lost Render disk automatically.
+- Render's filesystem is ephemeral unless a persistent disk is attached. This bot stores persistent bot data in MongoDB.
+- This code is a deployment template and should be tested in a private Telegram channel before production use.
+- Telegram's Bot API and external image hosts can fail temporarily. The bot logs errors to Render logs.
