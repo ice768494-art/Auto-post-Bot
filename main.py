@@ -175,7 +175,34 @@ def get_matching_value(mapping, anime_name):
 
 
 def get_anime_channel_link(anime_name):
-    return get_matching_value(ANIME_CHANNEL_LINKS, anime_name) or DEFAULT_CHANNEL_LINK
+    """Database links take priority over built-in links."""
+
+    try:
+        with closing(connect_db()) as conn:
+            rows = conn.execute(
+                """
+                SELECT anime_name, channel_link
+                FROM anime_links
+                ORDER BY length(anime_name) DESC
+                """
+            ).fetchall()
+
+        normalized = normalize_name(anime_name)
+
+        for row in rows:
+            key = normalize_name(row["anime_name"])
+
+            if key and (key in normalized or normalized in key):
+                return row["channel_link"]
+
+    except Exception:
+        logger.exception("Could not read anime channel links")
+
+    return (
+        get_matching_value(ANIME_CHANNEL_LINKS, anime_name)
+        or get_setting("default_channel_link")
+        or DEFAULT_CHANNEL_LINK
+    )
 
 
 def get_anime_poster_url(anime_name):
@@ -288,6 +315,13 @@ def init_db():
                 anime_key TEXT PRIMARY KEY,
                 anime_name TEXT NOT NULL,
                 poster_url TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS anime_links (
+               anime_key TEXT PRIMARY KEY,
+               anime_name TEXT NOT NULL,
+               channel_link TEXT NOT NULL
             )
         """)
         conn.commit()
@@ -901,6 +935,190 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     else:
         logger.error("Telegram handler reported an unknown error (update=%r)", update)
 
+async def setanimelink(update, context):
+    if not await is_admin(update):
+        return
+
+    args = context.args
+
+    if len(args) < 2:
+        await update.effective_message.reply_text(
+            "Usage:\n"
+            "/setanimelink Anime Name https://t.me/channel"
+        )
+        return
+
+    anime_name = " ".join(args[:-1]).strip()
+    link = args[-1].strip()
+
+    try:
+        link = validate_http_url(link)
+
+        parsed = urlparse(link)
+
+        if parsed.hostname not in ("t.me", "www.t.me", "telegram.me"):
+            raise ValueError("Please provide a valid Telegram channel link.")
+
+        with closing(connect_db()) as conn:
+            conn.execute(
+                """
+                INSERT INTO anime_links
+                (anime_key, anime_name, channel_link)
+                VALUES (?, ?, ?)
+                ON CONFLICT(anime_key)
+                DO UPDATE SET
+                    anime_name = excluded.anime_name,
+                    channel_link = excluded.channel_link
+                """,
+                (
+                    normalize_name(anime_name),
+                    anime_name,
+                    link
+                )
+            )
+            conn.commit()
+
+        await update.effective_message.reply_text(
+            f"✅ Anime channel link saved!\n\n"
+            f"🎬 Anime: {anime_name}\n"
+            f"🔗 Link: {link}"
+        )
+
+    except ValueError as exc:
+        await update.effective_message.reply_text(str(exc))
+
+    except Exception:
+        logger.exception("Failed to save anime link")
+        await update.effective_message.reply_text(
+            "❌ Failed to save anime channel link."
+        )
+
+
+async def removeanimelink(update, context):
+    if not await is_admin(update):
+        return
+
+    anime_name = " ".join(context.args).strip()
+
+    if not anime_name:
+        await update.effective_message.reply_text(
+            "Usage: /removeanimelink Anime Name"
+        )
+        return
+
+    with closing(connect_db()) as conn:
+        cursor = conn.execute(
+            "DELETE FROM anime_links WHERE anime_key = ?",
+            (normalize_name(anime_name),)
+        )
+        conn.commit()
+
+    if cursor.rowcount:
+        await update.effective_message.reply_text(
+            f"🗑️ Removed channel link for {anime_name}"
+        )
+    else:
+        await update.effective_message.reply_text(
+            f"❌ No saved channel link found for {anime_name}"
+        )
+
+
+async def listanimelinks(update, context):
+    if not await is_admin(update):
+        return
+
+    with closing(connect_db()) as conn:
+        rows = conn.execute(
+            """
+            SELECT anime_name, channel_link
+            FROM anime_links
+            ORDER BY anime_name COLLATE NOCASE
+            """
+        ).fetchall()
+
+    if not rows:
+        await update.effective_message.reply_text(
+            "📭 No anime channel links saved yet."
+        )
+        return
+
+    lines = ["🎌 SAVED ANIME CHANNEL LINKS\n"]
+
+    for row in rows:
+        lines.append(
+            f"🎬 {row['anime_name']}\n"
+            f"🔗 {row['channel_link']}\n"
+        )
+
+    message = "\n".join(lines)
+
+    for offset in range(0, len(message), 3500):
+        await update.effective_message.reply_text(
+            message[offset:offset + 3500],
+            disable_web_page_preview=True
+        )
+
+
+async def getanimelink(update, context):
+    if not await is_admin(update):
+        return
+
+    anime_name = " ".join(context.args).strip()
+
+    if not anime_name:
+        await update.effective_message.reply_text(
+            "Usage: /getanimelink Anime Name"
+        )
+        return
+
+    link = get_anime_channel_link(anime_name)
+
+    await update.effective_message.reply_text(
+        f"🎬 Anime: {anime_name}\n"
+        f"🔗 Channel: {link}",
+        disable_web_page_preview=True
+    )
+
+
+async def setdefaultlink(update, context):
+    if not await is_admin(update):
+        return
+
+    if len(context.args) != 1:
+        await update.effective_message.reply_text(
+            "Usage: /setdefaultlink https://t.me/channel"
+        )
+        return
+
+    try:
+        link = validate_http_url(context.args[0])
+
+        parsed = urlparse(link)
+
+        if parsed.hostname not in ("t.me", "www.t.me", "telegram.me"):
+            raise ValueError("Please provide a Telegram channel link.")
+
+        set_setting("default_channel_link", link)
+
+        await update.effective_message.reply_text(
+            f"✅ Default channel link updated!\n{link}"
+        )
+
+    except ValueError as exc:
+        await update.effective_message.reply_text(str(exc))
+
+
+async def defaultlink(update, context):
+    if not await is_admin(update):
+        return
+
+    link = get_setting("default_channel_link") or DEFAULT_CHANNEL_LINK
+
+    await update.effective_message.reply_text(
+        f"🔗 Default Anime Channel:\n{link}",
+        disable_web_page_preview=True
+        )
+
 # ==================== COMMANDS ====================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_message:
@@ -1080,6 +1298,17 @@ def main():
     application.add_handler(CommandHandler("listanime", listanime))
     application.add_handler(CommandHandler("setdefault", setdefault))
     application.add_handler(CommandHandler("defaultchannel", defaultchannel))
+    # Anime Channel Link Manager
+    application.add_handler(CommandHandler("setanimelink", setanimelink))
+
+    
+    application.add_handler(CommandHandler("removeanimelink", removeanimelink))
+    
+    application.add_handler(CommandHandler("listanimelinks", listanimelinks))
+    application.add_handler(CommandHandler("getanimelink", getanimelink))
+    application.add_handler(CommandHandler("setdefaultlink", setdefaultlink))
+
+    application.add_handler(CommandHandler("defaultlink", defaultlink))
     application.add_handler(CommandHandler("setposter", setposter))
     application.add_handler(CommandHandler("removeposter", removeposter))
     application.add_handler(CommandHandler("listposters", listposters))
