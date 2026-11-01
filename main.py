@@ -1013,11 +1013,25 @@ async def handle_channel_post(update, context):
         f"<blockquote><b>➽ NEW EPISODE {html.escape(episode)} ADDED 👇</b></blockquote>"
     )
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⎙• ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ •⎙", url=get_anime_channel_link(anime))],
-        [
-            InlineKeyboardButton("↪ ꜱʜᴀʀᴇ ᴄʜᴀɴɴᴇʟ", url="https://t.me/AnimeNetworkTamil"),
-            InlineKeyboardButton("⚠️ ᴀɴʏ ɪꜱꜱᴜᴇꜱ ⚠️", url="https://t.me/Tamil_Animes_New"),
-        ],
+    [
+        InlineKeyboardButton(
+            "⎙• ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ •⎙",
+            url=get_anime_channel_link(anime),
+            style="success"
+        )
+    ],
+    [
+        InlineKeyboardButton(
+            "↪ ꜱʜᴀʀᴇ ᴄʜᴀɴɴᴇʟ",
+            url="https://t.me/AnimeNetworkTamil",
+            style="primary"
+        ),
+        InlineKeyboardButton(
+            "⚠️ ᴀɴʏ ɪꜱꜱᴜᴇꜱ ⚠️",
+            url="https://t.me/Tamil_Animes_New",
+            style="danger"
+        ),
+    ],
     ])
     poster = get_anime_poster_url(anime)
     try:
