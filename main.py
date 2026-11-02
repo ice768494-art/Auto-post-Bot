@@ -1112,23 +1112,7 @@ async def process_source_post(update, context):
 
         return sent
 
-    try:
-        # MAIN CHANNEL: No quality buttons.
-        if not main_sent:
-            sent = await send_post(main_id)
-
-            last_message_id = sent.message_id
-
-            history_col.update_one(
-                {"_id": key},
-                {
-                    "$set": {
-                        "main_sent": True,
-                        "message_id": last_message_id,
-                    }
-                },
-            )
-
+    
         # SEPARATE ANIME CHANNEL: With quality buttons.
         if anime_id and anime_id != main_id and not anime_sent:
             sent = await send_post(anime_id, keyboard)
