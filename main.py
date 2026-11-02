@@ -1013,6 +1013,8 @@ def contains_episode(text):
 
 
 async def process_source_post(update, context):
+
+async def process_source_post(update, context):
     message = update.effective_message
     chat = update.effective_chat
 
@@ -1021,8 +1023,9 @@ async def process_source_post(update, context):
 
     try:
         expected_id = int(SOURCE_CHANNEL_ID)
-    except ValueError:
-        logger.error("SOURCE_CHANNEL_ID must be a numeric channel ID.")
+        main_destination = int(MAIN_CHANNEL_ID)
+    except (ValueError, TypeError):
+        logger.error("SOURCE_CHANNEL_ID and MAIN_CHANNEL_ID must be numeric.")
         return
 
     if chat.id != expected_id:
@@ -1036,22 +1039,32 @@ async def process_source_post(update, context):
     season = parsed["season_number"]
     episode = parsed["episode_number"]
 
-    # Always publish to Main Channel.
-    
-    # Also publish to the assigned anime channel.
+    # Main Channel: No buttons.
+    destinations = [
+        (str(main_destination), None, "Main Channel")
+    ]
+
+    # Separate Anime Channel: With quality buttons.
     route = get_route(anime)
 
     if route:
         anime_destination = str(route["channel_id"])
-    else:
-        # Use default channel if no anime-specific route exists.
-        default_id = get_setting("default_channel_id")
-        anime_destination = str(default_id) if default_id else None
 
-    if anime_destination and anime_destination not in destinations:
-        destinations.append(anime_destination)
+        if anime_destination != str(main_destination):
+            keyboard = make_quality_keyboard(parsed["qualities"])
+
+            destinations.append(
+                (anime_destination, keyboard, "Anime Channel")
+            )
+    else:
+        logger.warning(
+            "No separate anime channel configured for: %s",
+            anime
+        )
 
     key = f"upload:{normalize_name(anime)}:s{season}:e{episode}"
+
+    destination_ids = [item[0] for item in destinations]
 
     if not reserve_episode(key, {
         "type": "upload",
@@ -1060,16 +1073,16 @@ async def process_source_post(update, context):
         "episode": episode,
         "source_chat_id": chat.id,
         "source_message_id": message.message_id,
-        "destination_ids": destinations,
+        "destination_ids": destination_ids,
     }):
         logger.info("Duplicate or active upload ignored: %s", key)
         return
 
-    # Keep track of successful destinations to avoid reposting
-    # to a channel if a retry happens after partial success.
     existing = history_col.find_one({"_id": key}) or {}
+
     sent_destinations = set(
-        str(item) for item in existing.get("sent_destinations", [])
+        str(item)
+        for item in existing.get("sent_destinations", [])
     )
 
     background = (
@@ -1078,60 +1091,77 @@ async def process_source_post(update, context):
     )
 
     caption = make_caption(anime, season, episode)
-    keyboard = make_quality_keyboard(parsed["qualities"])
+
+    last_message_id = None
 
     try:
-        for destination_id in destinations:
-            destination_key = str(destination_id)
+        for destination_id, keyboard, destination_name in destinations:
 
-            if destination_key in sent_destinations:
+            if destination_id in sent_destinations:
                 continue
 
             sent = None
 
-            # Send poster with caption when an image URL exists.
+            # Send poster with caption.
             if background:
                 try:
-                    sent = await context.bot.send_photo(
-                        chat_id=destination_id,
-                        photo=background,
-                        caption=caption,
-                        parse_mode=ParseMode.HTML,
-                        reply_markup=keyboard,
+                    send_args = {
+                        "chat_id": destination_id,
+                        "photo": background,
+                        "caption": caption,
+                        "parse_mode": ParseMode.HTML,
                         **TG_TIMEOUTS,
-                    )
+                    }
+
+                    # Buttons only on separate anime channel.
+                    if keyboard is not None:
+                        send_args["reply_markup"] = keyboard
+
+                    sent = await context.bot.send_photo(**send_args)
+
                 except Exception:
                     logger.exception(
-                        "Poster send failed for %s. Trying text fallback.",
-                        destination_id,
+                        "Poster sending failed to %s. Trying text fallback.",
+                        destination_name,
                     )
 
-            # Fallback if no poster exists or photo sending fails.
+            # Text fallback.
             if sent is None:
-                sent = await context.bot.send_message(
-                    chat_id=destination_id,
-                    text=caption,
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=keyboard,
-                    disable_web_page_preview=True,
+                send_args = {
+                    "chat_id": destination_id,
+                    "text": caption,
+                    "parse_mode": ParseMode.HTML,
+                    "disable_web_page_preview": True,
                     **TG_TIMEOUTS,
-                )
+                }
 
-            # Save successful destination immediately.
+                if keyboard is not None:
+                    send_args["reply_markup"] = keyboard
+
+                sent = await context.bot.send_message(**send_args)
+
+            last_message_id = sent.message_id
+
             history_col.update_one(
                 {"_id": key},
-                {"$addToSet": {"sent_destinations": destination_key}},
+                {
+                    "$addToSet": {
+                        "sent_destinations": destination_id
+                    }
+                },
             )
 
-            sent_destinations.add(destination_key)
+            sent_destinations.add(destination_id)
 
             logger.info(
                 "Episode published: %s S%s E%s -> %s",
-                anime, season, episode, destination_id,
+                anime,
+                season,
+                episode,
+                destination_name,
             )
 
-        # Mark complete only after every destination succeeds.
-        mark_episode_sent(key, sent.message_id)
+        mark_episode_sent(key, last_message_id)
 
         METRICS["upload_ok"] += 1
 
@@ -1141,8 +1171,6 @@ async def process_source_post(update, context):
         )
 
     except Exception:
-        # Keep pending history for safe retry after the lease expires.
-        # Previously successful destinations are recorded above.
         METRICS["upload_failed"] += 1
 
         logger.exception(
@@ -1150,6 +1178,7 @@ async def process_source_post(update, context):
             anime,
             list(sent_destinations),
         )
+
 
 
 def extract_episode_details(text):
