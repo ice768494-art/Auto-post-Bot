@@ -1013,6 +1013,7 @@ def contains_episode(text):
 
 
 
+
 async def process_source_post(update, context):
     message = update.effective_message
     chat = update.effective_chat
@@ -1022,15 +1023,16 @@ async def process_source_post(update, context):
 
     try:
         expected_id = int(SOURCE_CHANNEL_ID)
-        main_destination = int(MAIN_CHANNEL_ID)
+        main_id = int(MAIN_CHANNEL_ID)
     except (ValueError, TypeError):
-        logger.error("SOURCE_CHANNEL_ID and MAIN_CHANNEL_ID must be numeric.")
+        logger.error("Invalid SOURCE_CHANNEL_ID or MAIN_CHANNEL_ID.")
         return
 
     if chat.id != expected_id:
         return
 
     parsed = parse_post(get_message_text(message))
+
     if not parsed:
         return
 
@@ -1038,32 +1040,11 @@ async def process_source_post(update, context):
     season = parsed["season_number"]
     episode = parsed["episode_number"]
 
-    # Main Channel: No buttons.
-    destinations = [
-        (str(main_destination), None)
-    ]
-
-    # Separate Anime Channel: With quality buttons.
+    # Find separate anime channel.
     route = get_route(anime)
-
-    if route:
-        anime_destination = str(route["channel_id"])
-
-        if anime_destination != str(main_destination):
-            keyboard = make_quality_keyboard(parsed["qualities"])
-
-            destinations.append(
-                (anime_destination, keyboard, "Anime Channel")
-            )
-    else:
-        logger.warning(
-            "No separate anime channel configured for: %s",
-            anime
-        )
+    anime_id = int(route["channel_id"]) if route else None
 
     key = f"upload:{normalize_name(anime)}:s{season}:e{episode}"
-
-    destination_ids = [item[0] for item in destinations]
 
     if not reserve_episode(key, {
         "type": "upload",
@@ -1072,17 +1053,14 @@ async def process_source_post(update, context):
         "episode": episode,
         "source_chat_id": chat.id,
         "source_message_id": message.message_id,
-        "destination_ids": destination_ids,
     }):
-        logger.info("Duplicate or active upload ignored: %s", key)
+        logger.info("Duplicate upload ignored: %s", key)
         return
 
     existing = history_col.find_one({"_id": key}) or {}
 
-    sent_destinations = set(
-        str(item)
-        for item in existing.get("sent_destinations", [])
-    )
+    main_sent = existing.get("main_sent", False)
+    anime_sent = existing.get("anime_sent", False)
 
     background = (
         parsed.get("image_url")
@@ -1090,74 +1068,87 @@ async def process_source_post(update, context):
     )
 
     caption = make_caption(anime, season, episode)
+    keyboard = make_quality_keyboard(parsed["qualities"])
 
-    last_message_id = None
+    last_message_id = existing.get("message_id")
 
-    try:
-        for destination_id, keyboard, destination_name in destinations:
+    async def send_post(channel_id, buttons=None):
+        sent = None
 
-            if destination_id in sent_destinations:
-                continue
-
-            sent = None
-
-            # Send poster with caption.
-            if background:
-                try:
-                    send_args = {
-                        "chat_id": destination_id,
-                        "photo": background,
-                        "caption": caption,
-                        "parse_mode": ParseMode.HTML,
-                        **TG_TIMEOUTS,
-                    }
-
-                    # Buttons only on separate anime channel.
-                    if keyboard is not None:
-                        send_args["reply_markup"] = keyboard
-
-                    sent = await context.bot.send_photo(**send_args)
-
-                except Exception:
-                    logger.exception(
-                        "Poster sending failed to %s. Trying text fallback.",
-                        destination_name,
-                    )
-
-            # Text fallback.
-            if sent is None:
-                send_args = {
-                    "chat_id": destination_id,
-                    "text": caption,
+        if background:
+            try:
+                args = {
+                    "chat_id": channel_id,
+                    "photo": background,
+                    "caption": caption,
                     "parse_mode": ParseMode.HTML,
-                    "disable_web_page_preview": True,
                     **TG_TIMEOUTS,
                 }
 
-                if keyboard is not None:
-                    send_args["reply_markup"] = keyboard
+                if buttons is not None:
+                    args["reply_markup"] = buttons
 
-                sent = await context.bot.send_message(**send_args)
+                sent = await context.bot.send_photo(**args)
+
+            except Exception:
+                logger.exception(
+                    "Photo sending failed to channel %s",
+                    channel_id,
+                )
+
+        if sent is None:
+            args = {
+                "chat_id": channel_id,
+                "text": caption,
+                "parse_mode": ParseMode.HTML,
+                "disable_web_page_preview": True,
+                **TG_TIMEOUTS,
+            }
+
+            if buttons is not None:
+                args["reply_markup"] = buttons
+
+            sent = await context.bot.send_message(**args)
+
+        return sent
+
+    try:
+        # MAIN CHANNEL: No quality buttons.
+        if not main_sent:
+            sent = await send_post(main_id)
 
             last_message_id = sent.message_id
 
             history_col.update_one(
                 {"_id": key},
                 {
-                    "$addToSet": {
-                        "sent_destinations": destination_id
+                    "$set": {
+                        "main_sent": True,
+                        "message_id": last_message_id,
                     }
                 },
             )
 
-            sent_destinations.add(destination_id)
+        # SEPARATE ANIME CHANNEL: With quality buttons.
+        if anime_id and anime_id != main_id and not anime_sent:
+            sent = await send_post(anime_id, keyboard)
 
-            logger.info(
-                "Episode published: %s S%s E%s -> %s",
+            last_message_id = sent.message_id
+
+            history_col.update_one(
+                {"_id": key},
+                {
+                    "$set": {
+                        "anime_sent": True,
+                        "message_id": last_message_id,
+                    }
+                },
+            )
+
+        elif not anime_id:
+            logger.warning(
+                "No separate anime channel configured for: %s",
                 anime,
-                season,
-                episode,
-                destination_name,
             )
 
         mark_episode_sent(key, last_message_id)
@@ -1165,17 +1156,18 @@ async def process_source_post(update, context):
         METRICS["upload_ok"] += 1
 
         logger.info(
-            "Episode successfully published to all destinations: %s",
+            "Episode published successfully: %s S%s E%s",
             anime,
+            season,
+            episode,
         )
 
     except Exception:
         METRICS["upload_failed"] += 1
 
         logger.exception(
-            "Episode publication incomplete for %s. Successful destinations: %s",
+            "Episode publication failed: %s",
             anime,
-            list(sent_destinations),
         )
 
 
