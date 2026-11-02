@@ -327,97 +327,7 @@ async def is_admin(update):
 
 # =========================================================
 # POSTER GENERATOR (TELEGRAM UPLOAD ONLY - NO PUBLIC URL)
-# =========================================================
-
-def load_font(size, bold=False):
-    paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold
-        else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if bold
-        else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-    ]
-    for font_path in paths:
-        try:
-            return ImageFont.truetype(font_path, size=size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
-
-
-def create_episode_poster(anime_name, season, episode, background_url=None):
-    width, height = 1280, 720
-    image = None
-    if background_url:
-        try:
-            response = requests.get(
-                background_url,
-                timeout=15,
-                headers={"User-Agent": "AnimeAutoPostBot/3.0"},
-            )
-            response.raise_for_status()
-            image = Image.open(io.BytesIO(response.content)).convert("RGB")
-            image = ImageOps.fit(image, (width, height))
-        except Exception:
-            logger.warning("Poster background could not be loaded; using graphic background.")
-
-    if image is None:
-        image = Image.new("RGB", (width, height), (18, 22, 42))
-
-    image = image.convert("RGBA")
-    overlay = Image.new("RGBA", (width, height), (5, 8, 20, 155))
-    image = Image.alpha_composite(image, overlay)
-    draw = ImageDraw.Draw(image)
-
-    draw.rounded_rectangle(
-        (55, 55, width - 55, height - 55),
-        radius=28, outline=(255, 255, 255, 190), width=3,
-    )
-    draw.text(
-        (95, 115), "ANIME NETWORK TAMIL",
-        font=load_font(30, True), fill=(255, 220, 120, 255),
-    )
-    draw.line((95, 170, width - 95, 170), fill=(255, 255, 255, 150), width=2)
-
-    title_font = load_font(58, True)
-    words, lines, current = str(anime_name)[:100].split(), [], ""
-    for word in words:
-        candidate = (current + " " + word).strip()
-        if draw.textbbox((0, 0), candidate, font=title_font)[2] > width - 190 and current:
-            lines.append(current)
-            current = word
-        else:
-            current = candidate
-    if current:
-        lines.append(current)
-
-    y = 235
-    for line in lines[:2]:
-        draw.text(
-            (95, y), line, font=title_font,
-            fill=(255, 255, 255, 255), stroke_width=2,
-            stroke_fill=(0, 0, 0, 180),
-        )
-        y += 78
-
-    draw.rounded_rectangle(
-        (95, 500, 790, 610), radius=18,
-        fill=(255, 190, 70, 235),
-    )
-    draw.text(
-        (125, 525),
-        f"SEASON {str(season).zfill(2)}  •  EPISODE {episode}",
-        font=load_font(28, True), fill=(20, 24, 40, 255),
-    )
-    draw.text(
-        (95, 640), "TAMIL AUDIO  •  MULTI QUALITY",
-        font=load_font(23, True), fill=(255, 255, 255, 230),
-    )
-
-    output = io.BytesIO()
-    image.convert("RGB").save(output, format="JPEG", quality=88, optimize=True)
-    output.seek(0)
-    output.name = "anime_episode.jpg"
-    return output
+# ========================================================
 
 
 # =========================================================
@@ -616,13 +526,13 @@ def release_episode(key):
 
 async def start_command(update, context):
     await update.effective_message.reply_text(
-        "🔥 Anime Auto Publisher V3 is running!\nUse /help to see commands."
+        "🔥 Bot Ku Uyir Iruku!\nUse /help to see commands."
     )
 
 
 async def help_command(update, context):
     await update.effective_message.reply_text(
-        "🎌 ANIME AUTO POST BOT V3\n\n"
+        "🎌 ANIME AUTO POST BOT \n\n"
         "General: /start /help /status\n"
         "Routes: /addanime Name ChannelID | /removeanime Name | /listanime\n"
         "Default: /setdefault ChannelID | /defaultchannel\n"
