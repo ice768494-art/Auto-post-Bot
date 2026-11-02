@@ -1012,7 +1012,6 @@ def contains_episode(text):
 
 
 
-async def process_source_post(update, context):
 
 async def process_source_post(update, context):
     message = update.effective_message
