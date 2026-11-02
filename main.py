@@ -1023,7 +1023,7 @@ async def process_source_post(update, context):
 
     try:
         expected_id = int(SOURCE_CHANNEL_ID)
-        main_id = int(MAIN_CHANNEL_ID)
+        
     except (ValueError, TypeError):
         logger.error("Invalid SOURCE_CHANNEL_ID or MAIN_CHANNEL_ID.")
         return
