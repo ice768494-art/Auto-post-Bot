@@ -1037,8 +1037,7 @@ async def process_source_post(update, context):
     episode = parsed["episode_number"]
 
     # Always publish to Main Channel.
-    destinations = [str(MAIN_CHANNEL_ID)]
-
+    
     # Also publish to the assigned anime channel.
     route = get_route(anime)
 
