@@ -1040,7 +1040,7 @@ async def process_source_post(update, context):
 
     # Main Channel: No buttons.
     destinations = [
-        (str(main_destination), None, "Main Channel")
+        (str(main_destination), None)
     ]
 
     # Separate Anime Channel: With quality buttons.
