@@ -415,9 +415,9 @@ def parse_post(text):
 
 def make_caption(anime, season, episode):
     template = get_setting("upload_caption_template") or (
-        "<b>{anime}</b> | தமிழ் Official Dub\n\n"
+        "<b>{anime}  | தமிழ் Official Dub\n\n"
         "Season : {season} | Episode : {episode}\n\n"
-        "‼️ Note - Click The Below Button to Get Episodes 👇"
+        "‼️ Note - Click The Below Button to Get Episodes</b> 👇"
     )
     values = {
         "anime": html.escape(str(anime)),
@@ -428,9 +428,9 @@ def make_caption(anime, season, episode):
         return template.format(**values)[:1000]
     except Exception:
         return (
-            f"<b>{values['anime']}</b> | தமிழ் Official Dub\n\n"
-            f"Season : {values['season']} | Episode : {values['episode']}\n\n"
-            "‼️ Click below to get episodes 👇"
+            f"<b>{values['anime']}</b> | <b>தமிழ் Official Dub</b>\n\n"
+            f"<b>Season : {values['season']} | Episode : {values['episode']}</b>\n\n"
+            "‼️<b> Click below to get episodes </b>👇"
         )
 
 
@@ -526,7 +526,7 @@ def release_episode(key):
 
 async def start_command(update, context):
     await update.effective_message.reply_text(
-        "🔥 Bot Ku Uyir Iruku!\nUse /help to see commands."
+        "🔥I'm Alive!\nUse /help to see commands."
     )
 
 
