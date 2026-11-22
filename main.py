@@ -431,9 +431,9 @@ def parse_post(text):
 
 def make_caption(anime, season, episode):
     template = get_setting("upload_caption_template") or (
-        "<b>{anime}  | தமிழ் Official Dub\n\n"
+        "<b;{anime} </b> | தமிழ் Official Dub\n\n"
         "Season : {season} | Episode : {episode}\n\n"
-        "‼️ Note - Click The Below Button to Get Episodes</b> 👇"
+        "‼️ Note - Click The Below Button to Get Episodes 👇"
     )
     values = {
         "anime": html.escape(str(anime)),
