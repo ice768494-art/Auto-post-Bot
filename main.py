@@ -11,6 +11,7 @@ from contextlib import closing
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 
+import httpx
 from bson import json_util
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import DuplicateKeyError, PyMongoError
@@ -19,7 +20,10 @@ from flask import Flask, request, redirect, session, send_file, render_template_
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.error import BadRequest
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+)
 
 # =========================================================
 # CONFIGURATION
@@ -147,6 +151,8 @@ posters_col = db["anime_posters"]
 links_col = db["anime_links"]
 history_col = db["episode_history"]
 logs_col = db["admin_logs"]
+pending_col = db["pending_posts"]
+info_col = db["anime_info_cache"]
 
 BACKUP_COLLECTIONS = [
     "anime_routes", "bot_settings", "anime_posters",
@@ -165,6 +171,7 @@ def init_db():
     history_col.create_index([("created_at", DESCENDING)])
     history_col.create_index([("status", ASCENDING)])
     logs_col.create_index([("created_at", DESCENDING)])
+    pending_col.create_index([("created_at", DESCENDING)])
     logger.info("MongoDB connected and indexes ready.")
 
 
@@ -332,6 +339,11 @@ def is_main_channel(channel_id):
     return normalize_channel_id(channel_id) in configured
 
 
+def to_chat_id(value):
+    value = str(value).strip()
+    return int(value) if re.fullmatch(r"-?\d+", value) else value
+
+
 async def is_admin(update):
     user = update.effective_user
     message = update.effective_message
@@ -344,6 +356,99 @@ async def is_admin(update):
         await message.reply_text("⛔ This command is admin-only.")
         return False
     return True
+
+
+async def notify_admins(bot, text, reply_markup=None):
+    """DM every admin. `text` is HTML, escape dynamic values before calling."""
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                chat_id=admin_id,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup,
+                disable_web_page_preview=True,
+                **TG_TIMEOUTS,
+            )
+        except Exception:
+            logger.warning("Could not DM admin %s (they must /start the bot first).", admin_id)
+
+
+# =========================================================
+# ANILIST (poster + info, cached for 7 days)
+# =========================================================
+
+ANILIST_URL = "https://graphql.anilist.co"
+ANILIST_QUERY = """
+query ($search: String) {
+  Media(search: $search, type: ANIME) {
+    title { romaji english }
+    coverImage { extraLarge large }
+    genres
+    averageScore
+    episodes
+    status
+    description(asHtml: false)
+  }
+}
+"""
+ANILIST_CACHE_SECONDS = 7 * 24 * 3600
+
+
+async def fetch_anilist(anime_name):
+    key = normalize_name(anime_name)
+    cached = info_col.find_one({"_id": key})
+    if cached and time.time() - float(cached.get("fetched_at", 0)) < ANILIST_CACHE_SECONDS:
+        return cached.get("data") or None
+
+    data = None
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                ANILIST_URL,
+                json={"query": ANILIST_QUERY, "variables": {"search": str(anime_name)}},
+            )
+        if resp.status_code == 200:
+            media = (resp.json().get("data") or {}).get("Media")
+            if media:
+                cover = media.get("coverImage") or {}
+                titles = media.get("title") or {}
+                description = re.sub(r"<[^>]+>", "", media.get("description") or "").strip()
+                data = {
+                    "title": titles.get("english") or titles.get("romaji") or anime_name,
+                    "cover": cover.get("extraLarge") or cover.get("large"),
+                    "genres": media.get("genres") or [],
+                    "score": media.get("averageScore"),
+                    "episodes": media.get("episodes"),
+                    "status": media.get("status"),
+                    "description": description[:300],
+                }
+        elif resp.status_code != 404:
+            # Temporary problem (rate limit, server error): do not cache.
+            logger.warning("AniList returned HTTP %s", resp.status_code)
+            return None
+    except Exception:
+        logger.warning("AniList lookup failed for %s", anime_name, exc_info=True)
+        return None
+
+    info_col.update_one(
+        {"_id": key},
+        {"$set": {"data": data, "fetched_at": time.time()}},
+        upsert=True,
+    )
+    return data
+
+
+async def resolve_poster(anime_name):
+    """Order: your custom poster -> built-in poster -> AniList cover -> default poster."""
+    doc = find_anime_document(posters_col, anime_name)
+    url = (doc.get("poster_url") if doc else None) or get_matching_value(ANIME_POSTERS, anime_name)
+    if url:
+        return url
+    info = await fetch_anilist(anime_name)
+    if info and info.get("cover"):
+        return info["cover"]
+    return get_setting("default_poster_url") or None
 
 
 # =========================================================
@@ -431,9 +536,9 @@ def parse_post(text):
 
 def make_caption(anime, season, episode):
     template = get_setting("upload_caption_template") or (
-        "<b;{anime} </b> | தமிழ் Official Dub\n\n"
+        "<b>{anime}  | தமிழ் Official Dub\n\n"
         "Season : {season} | Episode : {episode}\n\n"
-        "‼️ Note - Click The Below Button to Get Episodes 👇"
+        "‼️ Note - Click The Below Button to Get Episodes</b> 👇"
     )
     values = {
         "anime": html.escape(str(anime)),
@@ -566,8 +671,10 @@ async def help_command(update, context):
         "/getanimelink Name | /setdefaultlink Link | /defaultlink\n"
         "Posters: /setposter Name URL | /removeposter Name | /listposters\n"
         "/setdefaultposter URL_or_off\n"
-        "Tools: /stats | /searchanime Name | /animeinfo Name\n"
+        "Tools: /stats | /searchanime Name | /animeinfo Name | /anilist Name\n"
         "History: /history [Anime Name] | /clearhistory Anime Name\n"
+        "Posts: /deletepost Name [S2] 12 | /editpost Name [S2] 12 | new caption\n"
+        "Waiting: /pending | /cancel\n"
         "Backup: /backup | reply to backup JSON with /restore\n"
         "Caption: /setcaption HTML_template | /defaultcaption\n"
         "Dashboard: /dashboard"
@@ -603,9 +710,7 @@ async def mainchannels_command(update, context):
     lines = ["📣 MAIN CHANNELS\n"]
     for index, channel in enumerate(MAIN_CHANNEL_IDS, start=1):
         try:
-            chat = await context.bot.get_chat(
-                int(channel) if re.fullmatch(r"-?\d+", channel) else channel
-            )
+            chat = await context.bot.get_chat(to_chat_id(channel))
             lines.append(f"{index}. {chat.title or channel}\n🆔 {channel}")
         except Exception as exc:
             lines.append(f"{index}. ❌ {channel} ({type(exc).__name__})")
@@ -895,6 +1000,36 @@ async def animeinfo(update, context):
     )
 
 
+async def anilist_command(update, context):
+    if not await is_admin(update):
+        return
+    name = " ".join(context.args).strip()
+    if not name:
+        await update.effective_message.reply_text("Usage: /anilist Anime Name")
+        return
+    info = await fetch_anilist(name)
+    if not info:
+        await update.effective_message.reply_text("ℹ️ Nothing found on AniList.")
+        return
+    score = f"{info['score']}/100" if info.get("score") else "N/A"
+    text = (
+        f"🎬 <b>{html.escape(str(info['title']))}</b>\n"
+        f"⭐ Score: {score}\n"
+        f"🎭 Genres: {html.escape(', '.join(info.get('genres') or []) or 'N/A')}\n"
+        f"📺 Episodes: {info.get('episodes') or 'N/A'} | Status: {html.escape(str(info.get('status') or 'N/A'))}\n\n"
+        f"{html.escape(info.get('description') or '')}"
+    )[:1000]
+    if info.get("cover"):
+        try:
+            await update.effective_message.reply_photo(
+                photo=info["cover"], caption=text, parse_mode=ParseMode.HTML, **TG_TIMEOUTS
+            )
+            return
+        except Exception:
+            logger.exception("AniList cover send failed.")
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
 async def stats_command(update, context):
     if not await is_admin(update):
         return
@@ -905,6 +1040,7 @@ async def stats_command(update, context):
         f"Custom posters: {posters_col.count_documents({})}\n"
         f"Sent history: {history_col.count_documents({'status': 'sent'})}\n"
         f"Pending history: {history_col.count_documents({'status': 'pending'})}\n"
+        f"Waiting for route: {pending_col.count_documents({})}\n"
         f"Uploads: {METRICS['upload_ok']} / failed {METRICS['upload_failed']}\n"
         f"Announcements: {METRICS['announcement_ok']} / failed {METRICS['announcement_failed']}"
     )
@@ -1039,11 +1175,76 @@ async def dashboard_command(update, context):
 
 
 # =========================================================
-# CHANNEL POST PROCESSING
+# EPISODE POSTING (source handler + "Add route" flow)
 # =========================================================
 
 def contains_episode(text):
     return bool(re.search(r"\b(?:episode|ep)\b", text or "", re.I))
+
+
+async def post_episode(bot, parsed, anime_id, source_chat_id, source_message_id):
+    """Returns 'sent', 'duplicate' or 'failed'."""
+    anime = parsed["anime_name"]
+    season = parsed["season_number"]
+    episode = parsed["episode_number"]
+    key = f"upload:{normalize_name(anime)}:s{season}:e{episode}"
+
+    if not reserve_episode(key, {
+        "type": "upload",
+        "anime_name": anime,
+        "season": season,
+        "episode": episode,
+        "source_chat_id": source_chat_id,
+        "source_message_id": source_message_id,
+        "anime_channel_id": anime_id,
+        "qualities": parsed["qualities"],  # kept so /editpost can rebuild the buttons
+    }):
+        logger.info("Duplicate upload ignored: %s", key)
+        return "duplicate"
+
+    existing = history_col.find_one({"_id": key}) or {}
+    message_id = existing.get("message_id")
+
+    try:
+        if not existing.get("anime_sent"):
+            background = parsed.get("image_url") or await resolve_poster(anime)
+            caption = make_caption(anime, season, episode)
+            keyboard = make_quality_keyboard(parsed["qualities"])
+
+            sent = None
+            if background:
+                try:
+                    sent = await bot.send_photo(
+                        chat_id=anime_id, photo=background, caption=caption,
+                        parse_mode=ParseMode.HTML, reply_markup=keyboard, **TG_TIMEOUTS,
+                    )
+                except Exception:
+                    logger.exception("Anime poster sending failed. Trying text fallback.")
+            if sent is None:
+                sent = await bot.send_message(
+                    chat_id=anime_id, text=caption, parse_mode=ParseMode.HTML,
+                    reply_markup=keyboard, disable_web_page_preview=True, **TG_TIMEOUTS,
+                )
+            message_id = sent.message_id
+            history_col.update_one(
+                {"_id": key},
+                {"$set": {"anime_sent": True, "message_id": message_id}},
+            )
+
+        mark_episode_sent(key, message_id)
+        METRICS["upload_ok"] += 1
+        logger.info("Episode posted: %s S%s E%s -> %s", anime, season, episode, anime_id)
+        return "sent"
+    except Exception as exc:
+        METRICS["upload_failed"] += 1
+        logger.exception("Anime channel posting failed: %s", anime)
+        await notify_admins(
+            bot,
+            f"❌ <b>Upload failed</b>\n🎬 {html.escape(anime)} S{html.escape(str(season))} "
+            f"E{html.escape(str(episode))}\n⚠️ {html.escape(type(exc).__name__)}: "
+            f"{html.escape(str(exc)[:200])}",
+        )
+        return "failed"
 
 
 async def process_source_post(update, context):
@@ -1052,13 +1253,11 @@ async def process_source_post(update, context):
 
     if not message or not chat or not SOURCE_CHANNEL_ID:
         return
-
     try:
         expected_id = int(SOURCE_CHANNEL_ID)
     except (ValueError, TypeError):
         logger.error("Invalid SOURCE_CHANNEL_ID.")
         return
-
     if chat.id != expected_id:
         return
 
@@ -1068,12 +1267,11 @@ async def process_source_post(update, context):
         return
 
     anime = parsed["anime_name"]
-    season = parsed["season_number"]
-    episode = parsed["episode_number"]
-
     route = get_route(anime)
+
     if not route:
         logger.warning("No anime channel configured for: %s", anime)
+        await alert_missing_route(context, parsed, chat.id, message.message_id)
         return
 
     try:
@@ -1082,77 +1280,305 @@ async def process_source_post(update, context):
         logger.error("Invalid anime channel ID for: %s", anime)
         return
 
-    # Do not publish episode posts to any Main Channel.
     if is_main_channel(anime_id):
         logger.error("Anime channel cannot be a Main Channel: %s", anime)
         return
 
-    key = f"upload:{normalize_name(anime)}:s{season}:e{episode}"
+    await post_episode(context.bot, parsed, anime_id, chat.id, message.message_id)
 
-    if not reserve_episode(key, {
-        "type": "upload",
-        "anime_name": anime,
-        "season": season,
-        "episode": episode,
-        "source_chat_id": chat.id,
-        "source_message_id": message.message_id,
-        "anime_channel_id": anime_id,
-    }):
-        logger.info("Duplicate upload ignored: %s", key)
+
+# =========================================================
+# MISSING ROUTE ALERT
+# =========================================================
+
+async def alert_missing_route(context, parsed, chat_id, message_id):
+    if pending_col.find_one({"source_chat_id": chat_id, "source_message_id": message_id}):
+        return
+    token = secrets.token_hex(4)
+    pending_col.insert_one({
+        "_id": token,
+        "parsed": parsed,
+        "source_chat_id": chat_id,
+        "source_message_id": message_id,
+        "created_at": time.time(),
+    })
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("➕ Add route", callback_data=f"addroute:{token}"),
+        InlineKeyboardButton("🗑 Dismiss", callback_data=f"dismiss:{token}"),
+    ]])
+    await notify_admins(
+        context.bot,
+        "⚠️ <b>No route for this anime</b>\n"
+        f"🎬 {html.escape(parsed['anime_name'])}\n"
+        f"Season {html.escape(str(parsed['season_number']))} | "
+        f"Episode {html.escape(str(parsed['episode_number']))}\n\n"
+        "Tap <b>Add route</b>, then send the channel ID. The post will be sent automatically.",
+        reply_markup=keyboard,
+    )
+
+
+async def callback_handler(update, context):
+    query = update.callback_query
+    if not query or not query.from_user:
+        return
+    if query.from_user.id not in ADMIN_IDS:
+        await query.answer("Admin only.", show_alert=True)
         return
 
-    existing = history_col.find_one({"_id": key}) or {}
-    anime_sent = existing.get("anime_sent", False)
-    last_message_id = existing.get("message_id")
+    action, _, token = (query.data or "").partition(":")
+    pending = pending_col.find_one({"_id": token})
+    if not pending:
+        await query.answer("This request has expired.", show_alert=True)
+        return
 
-    background = parsed.get("image_url") or get_anime_poster_url(anime)
-    caption = make_caption(anime, season, episode)
-    keyboard = make_quality_keyboard(parsed["qualities"])
+    if action == "dismiss":
+        pending_col.delete_one({"_id": token})
+        await query.answer("Dismissed.")
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        return
 
-    async def send_anime_post():
-        sent = None
-        if background:
-            try:
-                sent = await context.bot.send_photo(
-                    chat_id=anime_id,
-                    photo=background,
-                    caption=caption,
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=keyboard,
-                    **TG_TIMEOUTS,
-                )
-            except Exception:
-                logger.exception("Anime poster sending failed. Trying text fallback.")
-        if sent is None:
-            sent = await context.bot.send_message(
-                chat_id=anime_id,
-                text=caption,
-                parse_mode=ParseMode.HTML,
-                reply_markup=keyboard,
-                disable_web_page_preview=True,
-                **TG_TIMEOUTS,
-            )
-        return sent
+    if action == "addroute":
+        context.user_data["awaiting_route_token"] = token
+        await query.answer()
+        await query.message.reply_text(
+            f"📢 Send the channel ID for:\n🎬 {pending['parsed']['anime_name']}\n\n"
+            "Example: -1001234567890\nSend /cancel to stop."
+        )
+
+
+async def private_text_handler(update, context):
+    user = update.effective_user
+    message = update.effective_message
+    token = context.user_data.get("awaiting_route_token")
+    if not token or not user or user.id not in ADMIN_IDS or not message:
+        return
+
+    pending = pending_col.find_one({"_id": token})
+    if not pending:
+        context.user_data.pop("awaiting_route_token", None)
+        await message.reply_text("ℹ️ That request has expired.")
+        return
 
     try:
-        if not anime_sent:
-            sent = await send_anime_post()
-            last_message_id = sent.message_id
-            history_col.update_one(
-                {"_id": key},
-                {"$set": {"anime_sent": True, "message_id": last_message_id}},
-            )
+        channel_id = parse_channel_id(message.text)
+        if is_main_channel(channel_id):
+            raise ValueError("That is a Main Channel. Send the anime's own channel ID.")
+        chat = await context.bot.get_chat(channel_id)
+    except Exception as exc:
+        await message.reply_text(f"❌ {exc}\nTry again or send /cancel.")
+        return
 
-        mark_episode_sent(key, last_message_id)
-        METRICS["upload_ok"] += 1
-        logger.info(
-            "Episode posted to separate anime channel: %s S%s E%s -> %s",
-            anime, season, episode, anime_id,
+    name = pending["parsed"]["anime_name"]
+    routes_col.update_one(
+        {"anime_key": normalize_name(name)},
+        {"$set": {
+            "anime_key": normalize_name(name), "anime_name": name,
+            "channel_id": channel_id, "updated_at": time.time(),
+        }},
+        upsert=True,
+    )
+    log_admin_action(user.id, "addroute_from_alert", name)
+    context.user_data.pop("awaiting_route_token", None)
+
+    sent = failed = 0
+    for row in list(pending_col.find({})):
+        if normalize_name(row["parsed"]["anime_name"]) != normalize_name(name):
+            continue
+        result = await post_episode(
+            context.bot, row["parsed"], channel_id,
+            row["source_chat_id"], row["source_message_id"],
         )
-    except Exception:
-        METRICS["upload_failed"] += 1
-        logger.exception("Anime channel posting failed: %s", anime)
+        if result == "failed":
+            failed += 1  # keep it pending so it can be retried
+        else:
+            pending_col.delete_one({"_id": row["_id"]})
+            sent += 1
 
+    await message.reply_text(
+        f"✅ Route saved: {name} → {chat.title or channel_id}\n"
+        f"📤 Posted {sent} waiting episode(s)" + (f", {failed} failed." if failed else ".")
+    )
+
+
+async def pending_command(update, context):
+    if not await is_admin(update):
+        return
+    rows = list(pending_col.find({}).sort("created_at", DESCENDING).limit(20))
+    if not rows:
+        await update.effective_message.reply_text("✅ No posts waiting for a route.")
+        return
+    lines = ["⏳ WAITING FOR A ROUTE\n"]
+    for row in rows:
+        p = row["parsed"]
+        lines.append(f"🎬 {p['anime_name']} | S{p['season_number']} E{p['episode_number']}")
+    lines.append("\nAdd the route with /addanime Name ChannelID, then re-send the post.")
+    await update.effective_message.reply_text("\n".join(lines))
+
+
+async def cancel_command(update, context):
+    context.user_data.pop("awaiting_route_token", None)
+    await update.effective_message.reply_text("✅ Cancelled.")
+
+
+# =========================================================
+# /deletepost AND /editpost
+# =========================================================
+
+def parse_post_args(args):
+    """'Anime Name [S2] 12'  ->  (name, season_or_None, episode)"""
+    args = list(args)
+    if len(args) < 2 or not re.fullmatch(r"\d+(?:\.\d+)?", args[-1]):
+        return None
+    episode = args.pop()
+    season = None
+    if len(args) > 1 and re.fullmatch(r"[sS]\d+", args[-1]):
+        season = str(int(args.pop()[1:]))
+    return " ".join(args).strip(), season, episode
+
+
+def find_sent_posts(name, season, episode):
+    rows = history_col.find({
+        "status": "sent",
+        "anime_name": {"$regex": f"^{re.escape(name)}$", "$options": "i"},
+        "episode": str(episode),
+    }).limit(30)
+    result = []
+    for row in rows:
+        if season is not None:
+            try:
+                if int(row.get("season")) != int(season):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        result.append(row)
+    return result
+
+
+def post_location(row):
+    chat = row.get("anime_channel_id") if row.get("type") == "upload" else row.get("destination_id")
+    message_id = row.get("telegram_message_id")
+    if chat is None or message_id is None:
+        return None, None
+    return to_chat_id(chat), int(message_id)
+
+
+async def deletepost(update, context):
+    if not await is_admin(update):
+        return
+    parsed = parse_post_args(context.args)
+    if not parsed:
+        await update.effective_message.reply_text(
+            "Usage: /deletepost Anime Name [S2] 12\n"
+            "Deletes that episode's post in the anime channel and all main channels.\n"
+            "The name must match exactly (check /history)."
+        )
+        return
+    name, season, episode = parsed
+    rows = find_sent_posts(name, season, episode)
+    if not rows:
+        await update.effective_message.reply_text("ℹ️ No sent posts found. Check /history for the exact name.")
+        return
+
+    deleted = failed = 0
+    for row in rows:
+        chat_id, message_id = post_location(row)
+        if chat_id is None:
+            failed += 1
+            continue
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=message_id, **TG_TIMEOUTS)
+            history_col.delete_one({"_id": row["_id"]})
+            deleted += 1
+        except Exception as exc:
+            if "not found" in str(exc).lower():
+                history_col.delete_one({"_id": row["_id"]})  # already gone
+                deleted += 1
+            else:
+                failed += 1
+                logger.exception("Delete failed for %s", row.get("_id"))
+
+    log_admin_action(update.effective_user.id, "deletepost", f"{name} S{season} E{episode}")
+    await update.effective_message.reply_text(
+        f"🗑️ Deleted {deleted} post(s)" + (f", {failed} failed." if failed else ".") +
+        "\nThe history record was removed, so the episode can be posted again."
+    )
+
+
+async def edit_one(bot, chat_id, message_id, text, keyboard):
+    try:
+        await bot.edit_message_caption(
+            chat_id=chat_id, message_id=message_id, caption=text,
+            parse_mode=ParseMode.HTML, reply_markup=keyboard, **TG_TIMEOUTS,
+        )
+        return
+    except BadRequest as exc:
+        if "not modified" in str(exc).lower():
+            return
+        # Not a photo post: fall through and edit as plain text.
+    await bot.edit_message_text(
+        chat_id=chat_id, message_id=message_id, text=text,
+        parse_mode=ParseMode.HTML, reply_markup=keyboard,
+        disable_web_page_preview=True, **TG_TIMEOUTS,
+    )
+
+
+async def editpost(update, context):
+    if not await is_admin(update):
+        return
+    raw = (update.effective_message.text or "").partition(" ")[2]
+    left, sep, new_text = raw.partition("|")
+    parsed = parse_post_args(left.split())
+    new_text = new_text.strip()
+    if not parsed or not sep or not new_text:
+        await update.effective_message.reply_text(
+            "Usage: /editpost Anime Name [S2] 12 | new HTML caption\n"
+            "Placeholders: {anime} {season} {episode}\n"
+            "Example: /editpost Black Clover 12 | <b>{anime}</b> Episode {episode} (fixed)"
+        )
+        return
+    name, season, episode = parsed
+    rows = find_sent_posts(name, season, episode)
+    if not rows:
+        await update.effective_message.reply_text("ℹ️ No sent posts found. Check /history for the exact name.")
+        return
+
+    edited = failed = 0
+    for row in rows:
+        chat_id, message_id = post_location(row)
+        if chat_id is None:
+            failed += 1
+            continue
+        text = (
+            new_text.replace("{anime}", html.escape(str(row.get("anime_name", ""))))
+            .replace("{season}", html.escape(str(row.get("season", "")).zfill(2)))
+            .replace("{episode}", html.escape(str(row.get("episode", ""))))
+        )[:1024]
+        if row.get("type") == "upload" and row.get("qualities"):
+            keyboard = make_quality_keyboard(row["qualities"])
+        elif row.get("type") == "announcement":
+            keyboard = make_announcement_keyboard(row.get("anime_name", ""))
+        else:
+            keyboard = None
+        try:
+            await edit_one(context.bot, chat_id, message_id, text, keyboard)
+            edited += 1
+        except Exception as exc:
+            failed += 1
+            logger.exception("Edit failed for %s", row.get("_id"))
+            await update.effective_message.reply_text(f"❌ {type(exc).__name__}: {str(exc)[:200]}")
+
+    log_admin_action(update.effective_user.id, "editpost", f"{name} S{season} E{episode}")
+    await update.effective_message.reply_text(
+        f"✏️ Edited {edited} post(s)" + (f", {failed} failed." if failed else ".")
+    )
+
+
+# =========================================================
+# ANNOUNCEMENTS TO MAIN CHANNELS
+# =========================================================
 
 def extract_episode_details(text):
     lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
@@ -1187,11 +1613,6 @@ def extract_episode_details(text):
             anime = line.strip("➪➥➤-:| ")
             break
     return anime, episode, season
-
-
-def to_chat_id(value):
-    value = str(value).strip()
-    return int(value) if re.fullmatch(r"-?\d+", value) else value
 
 
 async def send_announcement_to(context, destination, source, anime, season, episode,
@@ -1242,10 +1663,16 @@ async def send_announcement_to(context, destination, source, anime, season, epis
         mark_episode_sent(key, sent.message_id)
         METRICS["announcement_ok"] += 1
         logger.info("Announcement sent for %s episode %s -> %s", anime, episode, destination)
-    except Exception:
+    except Exception as exc:
         release_episode(key)
         METRICS["announcement_failed"] += 1
         logger.exception("Announcement failed for %s -> %s", anime, destination)
+        await notify_admins(
+            context.bot,
+            f"❌ <b>Announcement failed</b>\n🎬 {html.escape(anime)} E{html.escape(str(episode))}\n"
+            f"📣 {html.escape(str(destination))}\n⚠️ {html.escape(type(exc).__name__)}: "
+            f"{html.escape(str(exc)[:200])}",
+        )
 
 
 async def handle_channel_post(update, context):
@@ -1269,7 +1696,7 @@ async def handle_channel_post(update, context):
         f"<blockquote><b>➽ NEW EPISODE {html.escape(episode)} ADDED 👇</b></blockquote>"
     )
     keyboard = make_announcement_keyboard(anime)
-    poster_url = get_anime_poster_url(anime)
+    poster_url = await resolve_poster(anime)
 
     # Send to every configured main channel (one failure never blocks the others).
     for destination in MAIN_CHANNEL_IDS:
@@ -1521,9 +1948,14 @@ def main():
         "setdefaultposter": setdefaultposter,
         "searchanime": searchanime,
         "animeinfo": animeinfo,
+        "anilist": anilist_command,
         "stats": stats_command,
         "history": history_command,
         "clearhistory": clearhistory,
+        "deletepost": deletepost,
+        "editpost": editpost,
+        "pending": pending_command,
+        "cancel": cancel_command,
         "setcaption": setcaption,
         "defaultcaption": defaultcaption,
         "backup": backup_command,
@@ -1536,11 +1968,22 @@ def main():
     channel_filter = filters.ChatType.CHANNEL & (filters.TEXT | filters.CAPTION)
     app.add_handler(MessageHandler(channel_filter, handle_channel_post), group=0)
     app.add_handler(MessageHandler(channel_filter, process_source_post), group=1)
+
+    app.add_handler(
+        CallbackQueryHandler(callback_handler, pattern=r"^(addroute|dismiss):")
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND,
+            private_text_handler,
+        ),
+        group=2,
+    )
     app.add_error_handler(error_handler)
 
     logger.info("Starting Anime Auto Post Bot V3 with %d main channel(s).", len(MAIN_CHANNEL_IDS))
     app.run_polling(
-        allowed_updates=["message", "channel_post"],
+        allowed_updates=["message", "channel_post", "callback_query"],
         drop_pending_updates=False,
     )
 
