@@ -3,29 +3,23 @@ import re
 import io
 import time
 import html
-import json
 import logging
 import sqlite3
 import secrets
-from pathlib import Path
 from threading import Thread
 from contextlib import closing
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 
-import requests
 from bson import json_util
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from flask import Flask, request, redirect, session, send_file, render_template_string
-from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler, ContextTypes, filters
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 # =========================================================
 # CONFIGURATION
@@ -38,8 +32,26 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger("anime_auto_post_bot")
 
+
+def load_main_channel_ids():
+    """Read MAIN_CHANNEL_ID (comma separated allowed), MAIN_CHANNEL_ID_2, MAIN_CHANNEL_ID_3."""
+    raw_values = [
+        os.getenv("MAIN_CHANNEL_IDS", ""),
+        os.getenv("MAIN_CHANNEL_ID", ""),
+        os.getenv("MAIN_CHANNEL_ID_2", ""),
+        os.getenv("MAIN_CHANNEL_ID_3", ""),
+    ]
+    result = []
+    for raw in raw_values:
+        for item in raw.split(","):
+            item = item.strip()
+            if item and item not in result:
+                result.append(item)
+    return result
+
+
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-MAIN_CHANNEL_ID = os.getenv("MAIN_CHANNEL_ID", "").strip()
+MAIN_CHANNEL_IDS = load_main_channel_ids()
 SOURCE_CHANNEL_IDS = [
     x.strip() for x in os.getenv("SOURCE_CHANNEL_IDS", "").split(",") if x.strip()
 ]
@@ -58,7 +70,7 @@ DASHBOARD_SECRET = os.getenv("DASHBOARD_SECRET", "").strip() or secrets.token_he
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN is missing in Render environment variables.")
-if not MAIN_CHANNEL_ID:
+if not MAIN_CHANNEL_IDS:
     raise ValueError("MAIN_CHANNEL_ID is missing in Render environment variables.")
 if not SOURCE_CHANNEL_IDS:
     raise ValueError("SOURCE_CHANNEL_IDS is missing in Render environment variables.")
@@ -71,7 +83,6 @@ METRICS = {
     "upload_ok": 0, "upload_failed": 0,
 }
 
-# Every Telegram send operation uses these longer timeout values.
 TG_TIMEOUTS = {
     "read_timeout": 60,
     "write_timeout": 60,
@@ -136,6 +147,11 @@ posters_col = db["anime_posters"]
 links_col = db["anime_links"]
 history_col = db["episode_history"]
 logs_col = db["admin_logs"]
+
+BACKUP_COLLECTIONS = [
+    "anime_routes", "bot_settings", "anime_posters",
+    "anime_links", "episode_history", "admin_logs",
+]
 
 
 def normalize_name(value):
@@ -311,6 +327,11 @@ def source_is_allowed(chat):
     return bool(username and normalize_channel_id(username) in configured)
 
 
+def is_main_channel(channel_id):
+    configured = {normalize_channel_id(value) for value in MAIN_CHANNEL_IDS}
+    return normalize_channel_id(channel_id) in configured
+
+
 async def is_admin(update):
     user = update.effective_user
     message = update.effective_message
@@ -323,11 +344,6 @@ async def is_admin(update):
         await message.reply_text("⛔ This command is admin-only.")
         return False
     return True
-
-
-# =========================================================
-# POSTER GENERATOR (TELEGRAM UPLOAD ONLY - NO PUBLIC URL)
-# ========================================================
 
 
 # =========================================================
@@ -434,6 +450,16 @@ def make_caption(anime, season, episode):
         )
 
 
+def make_button(text, url, style=None):
+    """Create a URL button; falls back if this PTB version has no `style` support."""
+    if style:
+        try:
+            return InlineKeyboardButton(text, url=url, style=style)
+        except TypeError:
+            pass
+    return InlineKeyboardButton(text, url=url)
+
+
 def make_quality_keyboard(qualities):
     preferred = [
         "480P", "720P", "1080P", "360P", "240P",
@@ -452,21 +478,21 @@ def make_quality_keyboard(qualities):
 def make_announcement_keyboard(anime):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(
+            make_button(
                 "⎙• ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴊᴏɪɴ •⎙",
-                url=get_anime_channel_link(anime),
+                get_anime_channel_link(anime),
                 style="success",
             )
         ],
         [
-            InlineKeyboardButton(
+            make_button(
                 "↪ ꜱʜᴀʀᴇ ᴄʜᴀɴɴᴇʟ",
-                url="https://t.me/AnimeNetworkTamil",
+                "https://t.me/AnimeNetworkTamil",
                 style="primary",
             ),
-            InlineKeyboardButton(
+            make_button(
                 "⚠️ ᴀɴʏ ɪꜱꜱᴜᴇꜱ ⚠️",
-                url="https://t.me/Tamil_Animes_New",
+                "https://t.me/Tamil_Animes_New",
                 style="danger",
             ),
         ],
@@ -533,7 +559,7 @@ async def start_command(update, context):
 async def help_command(update, context):
     await update.effective_message.reply_text(
         "🎌 ANIME AUTO POST BOT \n\n"
-        "General: /start /help /status\n"
+        "General: /start /help /status /mainchannels\n"
         "Routes: /addanime Name ChannelID | /removeanime Name | /listanime\n"
         "Default: /setdefault ChannelID | /defaultchannel\n"
         "Links: /setanimelink Name Link | /removeanimelink Name | /listanimelinks\n"
@@ -564,10 +590,26 @@ async def status_command(update, context):
         f"🟢 Process: Running\n⏱️ Uptime: {hours}h {minutes}m {seconds}s\n"
         f"🗄️ MongoDB: {db_status}\n"
         f"📢 Announcement sources: {len(SOURCE_CHANNEL_IDS)}\n"
+        f"📣 Main channels: {len(MAIN_CHANNEL_IDS)}\n"
         f"🎬 Upload source: {'Configured' if SOURCE_CHANNEL_ID else 'Not configured'}\n"
         f"📤 Announcements: {METRICS['announcement_ok']} ok / {METRICS['announcement_failed']} failed\n"
         f"📤 Uploads: {METRICS['upload_ok']} ok / {METRICS['upload_failed']} failed"
     )
+
+
+async def mainchannels_command(update, context):
+    if not await is_admin(update):
+        return
+    lines = ["📣 MAIN CHANNELS\n"]
+    for index, channel in enumerate(MAIN_CHANNEL_IDS, start=1):
+        try:
+            chat = await context.bot.get_chat(
+                int(channel) if re.fullmatch(r"-?\d+", channel) else channel
+            )
+            lines.append(f"{index}. {chat.title or channel}\n🆔 {channel}")
+        except Exception as exc:
+            lines.append(f"{index}. ❌ {channel} ({type(exc).__name__})")
+    await update.effective_message.reply_text("\n\n".join(lines))
 
 
 async def addanime(update, context):
@@ -937,17 +979,13 @@ async def defaultcaption(update, context):
 async def backup_command(update, context):
     if not await is_admin(update):
         return
-    names = [
-        "anime_routes", "bot_settings", "anime_posters",
-        "anime_links", "episode_history", "admin_logs",
-    ]
     payload = {
         "backup_version": 3,
         "created_at": time.time(),
         "database": MONGODB_DATABASE,
         "collections": {},
     }
-    for name in names:
+    for name in BACKUP_COLLECTIONS:
         payload["collections"][name] = list(db[name].find({}))
     document = io.BytesIO(json_util.dumps(payload, indent=2).encode("utf-8"))
     document.name = f"anime_bot_backup_{int(time.time())}.json"
@@ -973,10 +1011,7 @@ async def restore_command(update, context):
         telegram_file = await context.bot.get_file(document.file_id, **TG_TIMEOUTS)
         content = bytes(await telegram_file.download_as_bytearray())
         payload = json_util.loads(content.decode("utf-8"))
-        allowed = {
-            "anime_routes", "bot_settings", "anime_posters",
-            "anime_links", "episode_history", "admin_logs",
-        }
+        allowed = set(BACKUP_COLLECTIONS)
         restored = 0
         for name, documents in payload.get("collections", {}).items():
             if name not in allowed or not isinstance(documents, list):
@@ -1011,10 +1046,6 @@ def contains_episode(text):
     return bool(re.search(r"\b(?:episode|ep)\b", text or "", re.I))
 
 
-
-
-
-
 async def process_source_post(update, context):
     message = update.effective_message
     chat = update.effective_chat
@@ -1032,7 +1063,6 @@ async def process_source_post(update, context):
         return
 
     parsed = parse_post(get_message_text(message))
-
     if not parsed:
         logger.warning("Source post parsing failed.")
         return
@@ -1041,14 +1071,9 @@ async def process_source_post(update, context):
     season = parsed["season_number"]
     episode = parsed["episode_number"]
 
-    # Find the assigned anime channel.
     route = get_route(anime)
-
     if not route:
-        logger.warning(
-            "No anime channel configured for: %s",
-            anime,
-        )
+        logger.warning("No anime channel configured for: %s", anime)
         return
 
     try:
@@ -1057,18 +1082,12 @@ async def process_source_post(update, context):
         logger.error("Invalid anime channel ID for: %s", anime)
         return
 
-    # Do not publish episode posts to Main Channel.
-    if MAIN_CHANNEL_ID and anime_id == int(MAIN_CHANNEL_ID):
-        logger.error(
-            "Anime channel cannot be the Main Channel: %s",
-            anime,
-        )
+    # Do not publish episode posts to any Main Channel.
+    if is_main_channel(anime_id):
+        logger.error("Anime channel cannot be a Main Channel: %s", anime)
         return
 
-    key = (
-        f"upload:{normalize_name(anime)}:"
-        f"s{season}:e{episode}"
-    )
+    key = f"upload:{normalize_name(anime)}:s{season}:e{episode}"
 
     if not reserve_episode(key, {
         "type": "upload",
@@ -1083,21 +1102,15 @@ async def process_source_post(update, context):
         return
 
     existing = history_col.find_one({"_id": key}) or {}
-
     anime_sent = existing.get("anime_sent", False)
     last_message_id = existing.get("message_id")
 
-    background = (
-        parsed.get("image_url")
-        or get_anime_poster_url(anime)
-    )
-
+    background = parsed.get("image_url") or get_anime_poster_url(anime)
     caption = make_caption(anime, season, episode)
     keyboard = make_quality_keyboard(parsed["qualities"])
 
     async def send_anime_post():
         sent = None
-
         if background:
             try:
                 sent = await context.bot.send_photo(
@@ -1109,10 +1122,7 @@ async def process_source_post(update, context):
                     **TG_TIMEOUTS,
                 )
             except Exception:
-                logger.exception(
-                    "Anime poster sending failed. Trying text fallback."
-                )
-
+                logger.exception("Anime poster sending failed. Trying text fallback.")
         if sent is None:
             sent = await context.bot.send_message(
                 chat_id=anime_id,
@@ -1122,46 +1132,26 @@ async def process_source_post(update, context):
                 disable_web_page_preview=True,
                 **TG_TIMEOUTS,
             )
-
         return sent
 
     try:
         if not anime_sent:
             sent = await send_anime_post()
-
             last_message_id = sent.message_id
-
             history_col.update_one(
                 {"_id": key},
-                {
-                    "$set": {
-                        "anime_sent": True,
-                        "message_id": last_message_id,
-                    }
-                },
+                {"$set": {"anime_sent": True, "message_id": last_message_id}},
             )
 
         mark_episode_sent(key, last_message_id)
-
         METRICS["upload_ok"] += 1
-
         logger.info(
             "Episode posted to separate anime channel: %s S%s E%s -> %s",
-            anime,
-            season,
-            episode,
-            anime_id,
+            anime, season, episode, anime_id,
         )
-
     except Exception:
         METRICS["upload_failed"] += 1
-
-        logger.exception(
-            "Anime channel posting failed: %s",
-            anime,
-        )
-
-
+        logger.exception("Anime channel posting failed: %s", anime)
 
 
 def extract_episode_details(text):
@@ -1199,6 +1189,65 @@ def extract_episode_details(text):
     return anime, episode, season
 
 
+def to_chat_id(value):
+    value = str(value).strip()
+    return int(value) if re.fullmatch(r"-?\d+", value) else value
+
+
+async def send_announcement_to(context, destination, source, anime, season, episode,
+                               announcement, keyboard, poster_url):
+    """Send one announcement to one main channel with its own duplicate protection."""
+    key = f"announcement:{source.chat.id}:{source.message_id}:{normalize_channel_id(destination)}"
+
+    if not reserve_episode(key, {
+        "type": "announcement",
+        "anime_name": anime,
+        "season": season,
+        "episode": episode,
+        "source_chat_id": source.chat.id,
+        "source_message_id": source.message_id,
+        "destination_id": str(destination),
+    }):
+        logger.info("Duplicate announcement ignored: %s", key)
+        return
+
+    try:
+        chat_id = to_chat_id(destination)
+        sent = None
+        if poster_url:
+            try:
+                sent = await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=poster_url,
+                    caption=announcement,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=keyboard,
+                    **TG_TIMEOUTS,
+                )
+            except Exception:
+                logger.exception(
+                    "Announcement poster send failed for %s; trying text fallback.", destination
+                )
+
+        if sent is None:
+            sent = await context.bot.send_message(
+                chat_id=chat_id,
+                text=announcement,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+                disable_web_page_preview=True,
+                **TG_TIMEOUTS,
+            )
+
+        mark_episode_sent(key, sent.message_id)
+        METRICS["announcement_ok"] += 1
+        logger.info("Announcement sent for %s episode %s -> %s", anime, episode, destination)
+    except Exception:
+        release_episode(key)
+        METRICS["announcement_failed"] += 1
+        logger.exception("Announcement failed for %s -> %s", anime, destination)
+
+
 async def handle_channel_post(update, context):
     source = update.channel_post
     if not source or not source_is_allowed(source.chat):
@@ -1209,18 +1258,6 @@ async def handle_channel_post(update, context):
         return
 
     anime, episode, season = extract_episode_details(text)
-    key = f"announcement:{source.chat.id}:{source.message_id}"
-
-    if not reserve_episode(key, {
-        "type": "announcement",
-        "anime_name": anime,
-        "season": season,
-        "episode": episode,
-        "source_chat_id": source.chat.id,
-        "source_message_id": source.message_id,
-        "destination_id": MAIN_CHANNEL_ID,
-    }):
-        return
 
     announcement = (
         f"<blockquote><b>➪ {html.escape(anime)}</b></blockquote>\n"
@@ -1234,42 +1271,16 @@ async def handle_channel_post(update, context):
     keyboard = make_announcement_keyboard(anime)
     poster_url = get_anime_poster_url(anime)
 
-    try:
-        sent = None
-        if poster_url:
-            try:
-                sent = await context.bot.send_photo(
-                    chat_id=MAIN_CHANNEL_ID,
-                    photo=poster_url,
-                    caption=announcement,
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=keyboard,
-                    **TG_TIMEOUTS,
-                )
-            except Exception:
-                logger.exception("Announcement poster send failed; trying text fallback.")
-
-        if sent is None:
-            sent = await context.bot.send_message(
-                chat_id=MAIN_CHANNEL_ID,
-                text=announcement,
-                parse_mode=ParseMode.HTML,
-                reply_markup=keyboard,
-                disable_web_page_preview=True,
-                **TG_TIMEOUTS,
-            )
-
-        mark_episode_sent(key, sent.message_id)
-        METRICS["announcement_ok"] += 1
-        logger.info("Announcement sent for %s episode %s", anime, episode)
-    except Exception:
-        release_episode(key)
-        METRICS["announcement_failed"] += 1
-        logger.exception("Announcement failed for %s", anime)
+    # Send to every configured main channel (one failure never blocks the others).
+    for destination in MAIN_CHANNEL_IDS:
+        await send_announcement_to(
+            context, destination, source, anime, season, episode,
+            announcement, keyboard, poster_url,
+        )
 
 
 # =========================================================
-# FLASK DASHBOARD (NO PUBLIC POSTER URL ROUTE)
+# FLASK DASHBOARD
 # =========================================================
 
 web = Flask(__name__)
@@ -1296,6 +1307,8 @@ LOGIN_PAGE = """<!doctype html><html><head><title>Anime Bot Login</title>""" + S
 DASHBOARD_PAGE = """<!doctype html><html><head><title>Anime Bot Dashboard</title>""" + STYLE + """
 </head><body><div class="wrap"><h1>🎌 Anime Auto Post Bot V3</h1>
 <p><a href="/logout">Logout</a> · <a href="/health">Health</a></p>
+<div class="card"><h2>📣 Main channels</h2>
+{% for channel in main_channels %}<p>{{ channel }}</p>{% endfor %}</div>
 <div class="card"><h2>➕ Add / update anime route</h2>
 <form method="post" action="/route">
 <input name="anime_name" placeholder="Anime name" required>
@@ -1344,7 +1357,9 @@ def login():
         return "Set DASHBOARD_PASSWORD in Render environment variables.", 503
     if request.method == "POST":
         password = request.form.get("password", "")
-        if secrets.compare_digest(password, DASHBOARD_PASSWORD):
+        if secrets.compare_digest(
+            password.encode("utf-8"), DASHBOARD_PASSWORD.encode("utf-8")
+        ):
             session.clear()
             session["dashboard_logged_in"] = True
             return redirect("/dashboard")
@@ -1363,7 +1378,9 @@ def dashboard():
     if not logged_in():
         return redirect("/login")
     routes = list(routes_col.find({}).sort("anime_name", ASCENDING).limit(300))
-    return render_template_string(DASHBOARD_PAGE, routes=routes)
+    return render_template_string(
+        DASHBOARD_PAGE, routes=routes, main_channels=MAIN_CHANNEL_IDS
+    )
 
 
 @web.route("/route", methods=["POST"])
@@ -1436,15 +1453,11 @@ def dashboard_poster():
 def dashboard_backup():
     if not logged_in():
         return redirect("/login")
-    names = [
-        "anime_routes", "bot_settings", "anime_posters",
-        "anime_links", "episode_history", "admin_logs",
-    ]
     payload = {
         "backup_version": 3,
         "created_at": time.time(),
         "database": MONGODB_DATABASE,
-        "collections": {name: list(db[name].find({})) for name in names},
+        "collections": {name: list(db[name].find({})) for name in BACKUP_COLLECTIONS},
     }
     data = json_util.dumps(payload, indent=2).encode("utf-8")
     return send_file(
@@ -1490,6 +1503,7 @@ def main():
         "start": start_command,
         "help": help_command,
         "status": status_command,
+        "mainchannels": mainchannels_command,
         "addanime": addanime,
         "removeanime": removeanime,
         "listanime": listanime,
@@ -1520,17 +1534,11 @@ def main():
         app.add_handler(CommandHandler(command, callback))
 
     channel_filter = filters.ChatType.CHANNEL & (filters.TEXT | filters.CAPTION)
-    app.add_handler(
-        MessageHandler(channel_filter, handle_channel_post),
-        group=0,
-    )
-    app.add_handler(
-        MessageHandler(channel_filter, process_source_post),
-        group=1,
-    )
+    app.add_handler(MessageHandler(channel_filter, handle_channel_post), group=0)
+    app.add_handler(MessageHandler(channel_filter, process_source_post), group=1)
     app.add_error_handler(error_handler)
 
-    logger.info("Starting Anime Auto Post Bot V3.")
+    logger.info("Starting Anime Auto Post Bot V3 with %d main channel(s).", len(MAIN_CHANNEL_IDS))
     app.run_polling(
         allowed_updates=["message", "channel_post"],
         drop_pending_updates=False,
