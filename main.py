@@ -56,10 +56,14 @@ def load_main_channel_ids():
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 MAIN_CHANNEL_IDS = load_main_channel_ids()
-SOURCE_CHANNEL_IDS = [
-    x.strip() for x in os.getenv("SOURCE_CHANNEL_IDS", "").split(",") if x.strip()
-]
-SOURCE_CHANNEL_ID = os.getenv("SOURCE_CHANNEL_ID", "").strip()
+# Accept both the old single-source variable and the newer multi-source variable.
+SOURCE_CHANNEL_IDS = list(dict.fromkeys(
+    x.strip()
+    for raw in (os.getenv("SOURCE_CHANNEL_IDS", ""), os.getenv("SOURCE_CHANNEL_ID", ""))
+    for x in raw.split(",")
+    if x.strip()
+))
+SOURCE_CHANNEL_ID = SOURCE_CHANNEL_IDS[0] if SOURCE_CHANNEL_IDS else ""
 ADMIN_IDS = {
     int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",")
     if x.strip().lstrip("-").isdigit()
@@ -1251,26 +1255,29 @@ async def process_source_post(update, context):
     message = update.effective_message
     chat = update.effective_chat
 
-    if not message or not chat or not SOURCE_CHANNEL_ID:
-        return
-    try:
-        expected_id = int(SOURCE_CHANNEL_ID)
-    except (ValueError, TypeError):
-        logger.error("Invalid SOURCE_CHANNEL_ID.")
-        return
-    if chat.id != expected_id:
+    if not message or not chat:
         return
 
-    parsed = parse_post(get_message_text(message))
+    # Use the same source matcher as the announcement handler. This supports
+    # SOURCE_CHANNEL_IDS (multiple IDs/usernames) and legacy SOURCE_CHANNEL_ID.
+    if not source_is_allowed(chat):
+        return
+
+    source_text = get_message_text(message)
+    parsed = parse_post(source_text)
     if not parsed:
-        logger.warning("Source post parsing failed.")
+        logger.warning(
+            "Separate-anime upload skipped: source post %s in %s did not match "
+            "the required format (Anime name, Episode, and quality URL lines).",
+            message.message_id, chat.id,
+        )
         return
 
     anime = parsed["anime_name"]
     route = get_route(anime)
 
     if not route:
-        logger.warning("No anime channel configured for: %s", anime)
+        logger.warning("No separate anime channel route configured for: %s", anime)
         await alert_missing_route(context, parsed, chat.id, message.message_id)
         return
 
@@ -1284,6 +1291,10 @@ async def process_source_post(update, context):
         logger.error("Anime channel cannot be a Main Channel: %s", anime)
         return
 
+    logger.info(
+        "Matched source post: %s S%s E%s -> anime channel %s",
+        anime, parsed["season_number"], parsed["episode_number"], anime_id,
+    )
     await post_episode(context.bot, parsed, anime_id, chat.id, message.message_id)
 
 
